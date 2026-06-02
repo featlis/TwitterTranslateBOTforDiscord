@@ -1,0 +1,1 @@
+"""Discord Twitter translation bot."""
