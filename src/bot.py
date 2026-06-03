@@ -252,7 +252,7 @@ class TranslationLanguageView(discord.ui.View):
         *,
         selected_lang: str | None = None,
     ) -> None:
-        super().__init__(timeout=900)
+        super().__init__(timeout=None)
         self.bot = bot
         self.link = link
         selected = canonical_language_code(selected_lang) if selected_lang else None
