@@ -4,10 +4,12 @@ from src.twitter_tools import (
     TweetStatus,
     build_translation_message,
     build_video_link_message,
+    canonical_language_code,
     extract_tweet_links,
     payload_has_video_media,
     parse_tweet_status,
     status_needs_translation,
+    to_api_language_code,
     to_fxtwitter_url,
 )
 
@@ -45,6 +47,15 @@ class TwitterToolsTest(unittest.TestCase):
             "https://fxtwitter.com/example/status/12345",
         )
 
+    def test_language_codes_accept_user_aliases(self) -> None:
+        self.assertEqual(canonical_language_code("ja"), "ja")
+        self.assertEqual(canonical_language_code("zh"), "zh")
+        self.assertEqual(canonical_language_code("ko"), "ko")
+        self.assertEqual(canonical_language_code("ch"), "zh")
+        self.assertEqual(canonical_language_code("kr"), "ko")
+        self.assertEqual(to_api_language_code("zh"), "zh")
+        self.assertEqual(to_api_language_code("ko"), "ko")
+
     def test_status_needs_translation_skips_japanese_source(self) -> None:
         status = TweetStatus(
             tweet_id="1",
@@ -54,6 +65,16 @@ class TwitterToolsTest(unittest.TestCase):
         )
 
         self.assertFalse(status_needs_translation(status))
+
+    def test_status_needs_translation_skips_chinese_source_for_zh_target(self) -> None:
+        status = TweetStatus(
+            tweet_id="1",
+            text="你好",
+            source_lang="zh-cn",
+            translation_text="Hello",
+        )
+
+        self.assertFalse(status_needs_translation(status, target_lang="zh"))
 
     def test_status_needs_translation_uses_translation_text(self) -> None:
         status = TweetStatus(
