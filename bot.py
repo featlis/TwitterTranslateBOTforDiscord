@@ -200,7 +200,12 @@ class TwitterTranslateBot(commands.Bot):
             try:
                 await message.reply(
                     response_text,
-                    view=TranslationLanguageView(self, link, selected_lang=self.default_target_lang),
+                    view=TranslationLanguageView(
+                        self,
+                        link,
+                        selected_lang=self.default_target_lang,
+                        source_lang=_status_source_lang(status),
+                    ),
                     mention_author=False,
                     allowed_mentions=discord.AllowedMentions.none(),
                 )
@@ -251,13 +256,18 @@ class TranslationLanguageView(discord.ui.View):
         link: TweetLink,
         *,
         selected_lang: str | None = None,
+        source_lang: str | None = None,
     ) -> None:
         super().__init__(timeout=None)
         self.bot = bot
         self.link = link
+        self.source_lang = source_lang
         selected = canonical_language_code(selected_lang) if selected_lang else None
 
         for lang in supported_language_codes():
+            if source_lang and is_target_language(source_lang, lang):
+                continue
+
             button = discord.ui.Button(
                 label=language_label(lang),
                 style=discord.ButtonStyle.primary if lang == selected else discord.ButtonStyle.secondary,
@@ -280,6 +290,15 @@ class TranslationLanguageView(discord.ui.View):
                 await interaction.followup.send(f"翻訳中にエラーが出ました: `{type(exc).__name__}`", ephemeral=True)
                 return
 
+            source_lang = _status_source_lang(status)
+            if source_lang and is_target_language(source_lang, target_lang):
+                if interaction.message is not None:
+                    await interaction.message.edit(
+                        view=TranslationLanguageView(self.bot, self.link, source_lang=source_lang),
+                        allowed_mentions=discord.AllowedMentions.none(),
+                    )
+                return
+
             if status_needs_translation(status, target_lang):
                 content = build_translation_message(status, self.link.url, target_lang=target_lang)
             elif status.has_video:
@@ -298,7 +317,12 @@ class TranslationLanguageView(discord.ui.View):
 
             await interaction.message.edit(
                 content=content,
-                view=TranslationLanguageView(self.bot, self.link, selected_lang=target_lang),
+                view=TranslationLanguageView(
+                    self.bot,
+                    self.link,
+                    selected_lang=target_lang,
+                    source_lang=source_lang,
+                ),
                 allowed_mentions=discord.AllowedMentions.none(),
             )
 
@@ -349,7 +373,12 @@ def register_commands(bot: TwitterTranslateBot) -> None:
             await interaction.followup.send(
                 "取得と翻訳に成功しました。\n\n"
                 + build_translation_message(status, link.url, target_lang=bot.default_target_lang),
-                view=TranslationLanguageView(bot, link, selected_lang=bot.default_target_lang),
+                view=TranslationLanguageView(
+                    bot,
+                    link,
+                    selected_lang=bot.default_target_lang,
+                    source_lang=_status_source_lang(status),
+                ),
                 ephemeral=True,
             )
             return
@@ -408,7 +437,12 @@ def register_commands(bot: TwitterTranslateBot) -> None:
         if status_needs_translation(status, target_lang):
             await interaction.followup.send(
                 build_translation_message(status, link.url, target_lang=target_lang),
-                view=TranslationLanguageView(bot, link, selected_lang=target_lang),
+                view=TranslationLanguageView(
+                    bot,
+                    link,
+                    selected_lang=target_lang,
+                    source_lang=_status_source_lang(status),
+                ),
                 allowed_mentions=discord.AllowedMentions.none(),
             )
             return
@@ -416,7 +450,12 @@ def register_commands(bot: TwitterTranslateBot) -> None:
         if status.has_video:
             await interaction.followup.send(
                 build_video_link_message(link.url),
-                view=TranslationLanguageView(bot, link, selected_lang=target_lang),
+                view=TranslationLanguageView(
+                    bot,
+                    link,
+                    selected_lang=target_lang,
+                    source_lang=_status_source_lang(status),
+                ),
                 allowed_mentions=discord.AllowedMentions.none(),
             )
             return
@@ -459,6 +498,10 @@ def _message_text_candidates(message: discord.Message) -> list[str]:
                 parts.append(value)
 
     return parts
+
+
+def _status_source_lang(status: TweetStatus) -> str | None:
+    return status.source_lang or status.translation_source_lang
 
 
 def main() -> None:

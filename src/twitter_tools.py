@@ -18,6 +18,27 @@ TWEET_URL_RE = re.compile(
 
 JAPANESE_SCRIPT_RE = re.compile(r"[\u3040-\u30ff]")
 
+LANGUAGE_OPTIONS: dict[str, dict[str, str]] = {
+    "ja": {"api_code": "ja", "label": "日本語"},
+    "en": {"api_code": "en", "label": "English"},
+    "zh": {"api_code": "zh", "label": "中文"},
+    "ko": {"api_code": "ko", "label": "한국어"},
+}
+
+LANGUAGE_ALIASES = {
+    "ja": "ja",
+    "jp": "ja",
+    "en": "en",
+    "ch": "zh",
+    "cn": "zh",
+    "zh": "zh",
+    "zh-cn": "zh",
+    "zh-hans": "zh",
+    "kr": "ko",
+    "ko": "ko",
+    "kor": "ko",
+}
+
 
 @dataclass(frozen=True)
 class TweetLink:
@@ -72,11 +93,35 @@ def normalize_lang_code(lang: str | None) -> str | None:
     return lang.strip().lower().replace("_", "-") or None
 
 
+def supported_language_codes() -> tuple[str, ...]:
+    return tuple(LANGUAGE_OPTIONS)
+
+
+def canonical_language_code(lang: str | None) -> str:
+    normalized = normalize_lang_code(lang)
+    if not normalized:
+        raise ValueError("Language code is empty.")
+
+    canonical = LANGUAGE_ALIASES.get(normalized) or LANGUAGE_ALIASES.get(normalized.split("-", 1)[0])
+    if canonical not in LANGUAGE_OPTIONS:
+        supported = ", ".join(supported_language_codes())
+        raise ValueError(f"Unsupported language '{lang}'. Use one of: {supported}.")
+    return canonical
+
+
+def to_api_language_code(lang: str | None) -> str:
+    return LANGUAGE_OPTIONS[canonical_language_code(lang)]["api_code"]
+
+
+def language_label(lang: str | None) -> str:
+    return LANGUAGE_OPTIONS[canonical_language_code(lang)]["label"]
+
+
 def is_target_language(lang: str | None, target_lang: str = "ja") -> bool:
     normalized_lang = normalize_lang_code(lang)
-    normalized_target = normalize_lang_code(target_lang)
-    if not normalized_lang or not normalized_target:
+    if not normalized_lang:
         return False
+    normalized_target = to_api_language_code(target_lang)
     return normalized_lang.split("-", 1)[0] == normalized_target.split("-", 1)[0]
 
 
@@ -123,7 +168,7 @@ async def fetch_tweet_status(
 
     async with session.get(
         request_url,
-        params={"lang": target_lang},
+        params={"lang": to_api_language_code(target_lang)},
         timeout=timeout,
     ) as response:
         try:
@@ -234,7 +279,7 @@ def build_translation_message(
     max_length: int = 1900,
 ) -> str:
     source_lang = status.source_lang or status.translation_source_lang or "unknown"
-    target = status.translation_target_lang or target_lang
+    target = language_label(target_lang)
     author = f"@{status.author_handle}" if status.author_handle else "Twitter/X"
 
     translated_text = (status.translation_text or "").strip()
