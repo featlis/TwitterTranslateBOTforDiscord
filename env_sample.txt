@@ -1,0 +1,24 @@
+DISCORD_TOKEN=put_your_discord_bot_token_here
+
+# optional: set this while developing so slash commands sync immediately to one server.
+# leave empty to sync slash commands globality.
+
+DISCORD_GUILD_ID=
+
+# default target language: use of =ja, en, zh, ko
+TARGET_LANG=ja
+
+BOT_CONFIG_PATH=bot_config.json
+
+FXTWITTER_API_BASE=https://api.fxtwitter.com/2/status
+
+REQUEST_TIMEOUT_SECONDS=10
+
+# log data: use of:INFO, DEBUG
+LOG_LEVEL=INFO
+
+# shaed count is use part of shard 
+SHARD_COUNT=4
+
+# id is allocate number of shard
+SHARD_IDS=1,2
