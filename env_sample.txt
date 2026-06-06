@@ -1,11 +1,11 @@
 DISCORD_TOKEN=put_your_discord_bot_token_here
 
 # optional: set this while developing so slash commands sync immediately to one server.
-# leave empty to sync slash commands globality.
+# leave empty to sync slash commands globally.
 
 DISCORD_GUILD_ID=
 
-# default target language: use of =ja, en, zh, ko
+# default target language: use of ja, en, zh, ko.
 TARGET_LANG=ja
 
 BOT_CONFIG_PATH=bot_config.json
@@ -17,8 +17,8 @@ REQUEST_TIMEOUT_SECONDS=10
 # log data: use of:INFO, DEBUG
 LOG_LEVEL=INFO
 
-# shaed count is use part of shard 
+# Number of shard divisions 
 SHARD_COUNT=4
 
-# id is allocate number of shard
+# Assigning shard IDs to this instance
 SHARD_IDS=1,2
