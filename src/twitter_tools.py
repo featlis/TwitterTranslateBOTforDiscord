@@ -60,6 +60,12 @@ UI_MESSAGES = {
         "translate_tweet_desc": "Twitter/Xリンクを指定した言語へ翻訳します。",
         "set_default_lang_desc": "自動翻訳のデフォルト言語を変更します。",
         "set_ui_lang_desc": "BOTの応答言語を変更します。",
+        "url_param_desc": "確認・翻訳したいTwitter/Xの投稿URL",
+        "lang_param_desc": "翻訳先の言語、またはBOTの応答言語",
+        "lang_name_ja": "日本語",
+        "lang_name_en": "英語",
+        "lang_name_zh": "中国語",
+        "lang_name_ko": "韓国語",
     },
     "en": {
         "translated_header": "**Translated {author}'s post ({source} -> {target})**",
@@ -81,6 +87,12 @@ UI_MESSAGES = {
         "translate_tweet_desc": "Translate a Twitter/X link to a specified language.",
         "set_default_lang_desc": "Change the default target language for automatic translation.",
         "set_ui_lang_desc": "Change the bot's response language.",
+        "url_param_desc": "The Twitter/X post URL to check or translate",
+        "lang_param_desc": "The target language or bot response language",
+        "lang_name_ja": "Japanese",
+        "lang_name_en": "English",
+        "lang_name_zh": "Chinese",
+        "lang_name_ko": "Korean",
     },
     "zh": {
         "translated_header": "**翻译了 {author} 的推文 ({source} -> {target})**",
@@ -102,6 +114,12 @@ UI_MESSAGES = {
         "translate_tweet_desc": "将 Twitter/X 链接翻译成指定语言。",
         "set_default_lang_desc": "更改自动翻译的默认目标语言。",
         "set_ui_lang_desc": "更改 BOT 的响应语言。",
+        "url_param_desc": "要检查或翻译的 Twitter/X 推文链接",
+        "lang_param_desc": "目标语言或 BOT 响应语言",
+        "lang_name_ja": "日语",
+        "lang_name_en": "英语",
+        "lang_name_zh": "中文",
+        "lang_name_ko": "韩语",
     },
     "ko": {
         "translated_header": "**{author} 님의 게시물을 번역했습니다 ({source} -> {target})**",
@@ -123,6 +141,12 @@ UI_MESSAGES = {
         "translate_tweet_desc": "Twitter/X 링크를 지정한 언어로 번역합니다.",
         "set_default_lang_desc": "자동 번역의 기본 대상 언어를 변경합니다.",
         "set_ui_lang_desc": "봇의 응답 언어를 변경합니다.",
+        "url_param_desc": "확인 또는 번역할 Twitter/X 게시물 URL",
+        "lang_param_desc": "대상 언어 또는 봇 응답 언어",
+        "lang_name_ja": "일본어",
+        "lang_name_en": "영어",
+        "lang_name_zh": "중국어",
+        "lang_name_ko": "한국어",
     }
 }
 
