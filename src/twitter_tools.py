@@ -39,6 +39,100 @@ LANGUAGE_ALIASES = {
     "kor": "ko",
 }
 
+UI_MESSAGES = {
+    "ja": {
+        "translated_header": "**{author} の投稿を翻訳しました ({source} -> {target})**",
+        "fetch_error": "投稿を取得できませんでした: `{exc}`",
+        "unexpected_error": "エラーが出ました: `{type}`",
+        "no_translation": "{lang}への翻訳文を取得できませんでした。投稿がすでに同じ言語か、翻訳APIから翻訳文が返っていません。",
+        "invalid_url": "Twitter/Xの投稿URLとして認識できませんでした。`https://x.com/user/status/123...` の形式で試してください。",
+        "ping": "Pong! WebSocket: `{websocket_ms}ms` / Interaction: `{interaction_ms}ms`",
+        "test_success": "取得と翻訳に成功しました。",
+        "test_video": "投稿は翻訳対象ではありませんが、動画付きなので通常投稿ではFxTwitterリンクを返信します。",
+        "test_skipped": "投稿は取得できましたが、通常投稿では返信しません。",
+        "reason_api": "翻訳文がAPIから返っていません。",
+        "reason_lang": "投稿が翻訳先の言語として判定されたためスキップされます。",
+        "set_default_lang": "自動翻訳のデフォルト言語を {label} (`{code}`) に変更しました。",
+        "set_ui_lang": "BOTの応答言語を {label} (`{code}`) に変更しました。",
+        "config_save_error": "設定を保存できませんでした: `{type}`",
+        "ping_desc": "BOTの応答速度を測定します。",
+        "tweet_test_desc": "Twitter/Xリンクの翻訳取得をテストします。",
+        "translate_tweet_desc": "Twitter/Xリンクを指定した言語へ翻訳します。",
+        "set_default_lang_desc": "自動翻訳のデフォルト言語を変更します。",
+        "set_ui_lang_desc": "BOTの応答言語を変更します。",
+    },
+    "en": {
+        "translated_header": "**Translated {author}'s post ({source} -> {target})**",
+        "fetch_error": "Could not fetch post: `{exc}`",
+        "unexpected_error": "An error occurred: `{type}`",
+        "no_translation": "Could not get translation for {lang}. The post might be in that language or API didn't return text.",
+        "invalid_url": "Invalid Twitter/X URL. Try `https://x.com/user/status/123...`.",
+        "ping": "Pong! WebSocket: `{websocket_ms}ms` / Interaction: `{interaction_ms}ms`",
+        "test_success": "Successfully fetched and translated.",
+        "test_video": "Post doesn't need translation, but contains video so FxTwitter link is used.",
+        "test_skipped": "Fetched the post, but it won't be sent automatically.",
+        "reason_api": "Translation text was not returned by API.",
+        "reason_lang": "Post is already in the target language.",
+        "set_default_lang": "Changed default translation language to {label} (`{code}`).",
+        "set_ui_lang": "Changed bot's response language to {label} (`{code}`).",
+        "config_save_error": "Could not save settings: `{type}`",
+        "ping_desc": "Measure the bot's response latency.",
+        "tweet_test_desc": "Test fetching and translating a Twitter/X link.",
+        "translate_tweet_desc": "Translate a Twitter/X link to a specified language.",
+        "set_default_lang_desc": "Change the default target language for automatic translation.",
+        "set_ui_lang_desc": "Change the bot's response language.",
+    },
+    "zh": {
+        "translated_header": "**翻译了 {author} 的推文 ({source} -> {target})**",
+        "fetch_error": "无法获取推文: `{exc}`",
+        "unexpected_error": "发生错误: `{type}`",
+        "no_translation": "无法获取 {lang} 的翻译推文可能已经是该语言，或者翻译 API 未返回内容。",
+        "invalid_url": "无法识别为 Twitter/X 链接。请尝试 `https://x.com/user/status/123...`。",
+        "ping": "Pong! WebSocket: `{websocket_ms}ms` / Interaction: `{interaction_ms}ms`",
+        "test_success": "获取并翻译成功。",
+        "test_video": "推文不需要翻译，但由于包含视频，将返回 FxTwitter 链接。",
+        "test_skipped": "推文已获取，但在普通消息中不会自动回复。",
+        "reason_api": "翻译 API 未返回翻译文本。",
+        "reason_lang": "推文已被判定为目标语言。",
+        "set_default_lang": "已将默认翻译语言更改为 {label} (`{code}`)。",
+        "set_ui_lang": "已将 BOT 响应语言更改为 {label} (`{code}`)。",
+        "config_save_error": "无法保存设置: `{type}`",
+        "ping_desc": "测量 BOT 的响应速度。",
+        "tweet_test_desc": "测试 Twitter/X 链接的获取和翻译。",
+        "translate_tweet_desc": "将 Twitter/X 链接翻译成指定语言。",
+        "set_default_lang_desc": "更改自动翻译的默认目标语言。",
+        "set_ui_lang_desc": "更改 BOT 的响应语言。",
+    },
+    "ko": {
+        "translated_header": "**{author} 님의 게시물을 번역했습니다 ({source} -> {target})**",
+        "fetch_error": "게시물을 가져올 수 없습니다: `{exc}`",
+        "unexpected_error": "오류가 발생했습니다: `{type}`",
+        "no_translation": "{lang} 번역문을 가져올 수 없습니다. 이미 해당 언어이거나 API에서 번역문을 반환하지 않았습니다.",
+        "invalid_url": "Twitter/X URL을 인식할 수 없습니다. `https://x.com/user/status/123...` 형식으로 시도해 주세요.",
+        "ping": "Pong! WebSocket: `{websocket_ms}ms` / Interaction: `{interaction_ms}ms`",
+        "test_success": "게시물 가져오기 및 번역에 성공했습니다.",
+        "test_video": "번역 대상은 아니지만, 동영상이 포함되어 있어 FxTwitter 링크를 반환합니다.",
+        "test_skipped": "게시물을 가져왔지만, 일반 메시지에서는 회신하지 않습니다.",
+        "reason_api": "API에서 번역문을 반환하지 않았습니다.",
+        "reason_lang": "게시물이 이미 대상 언어로 판정되어 건너뜁니다.",
+        "set_default_lang": "기본 번역 언어를 {label} (`{code}`)(으)로 변경했습니다.",
+        "set_ui_lang": "봇 응답 언어를 {label} (`{code}`)(으)로 변경했습니다.",
+        "config_save_error": "설정을 저장할 수 없습니다: `{type}`",
+        "ping_desc": "BOT의 응답 속도를 측정합니다.",
+        "tweet_test_desc": "Twitter/X 링크의 번역 가져오기를 테스트합니다.",
+        "translate_tweet_desc": "Twitter/X 링크를 지정한 언어로 번역합니다.",
+        "set_default_lang_desc": "자동 번역의 기본 대상 언어를 변경합니다.",
+        "set_ui_lang_desc": "봇의 응답 언어를 변경합니다.",
+    }
+}
+
+
+def get_ui_message(key: str, ui_lang: str = "ja", **kwargs) -> str:
+    """Get a localized UI message."""
+    lang = ui_lang if ui_lang in UI_MESSAGES else "ja"
+    template = UI_MESSAGES[lang].get(key, UI_MESSAGES["ja"].get(key, key))
+    return template.format(**kwargs)
+
 
 @dataclass(frozen=True)
 class TweetLink:
@@ -276,6 +370,7 @@ def build_translation_message(
     original_url: str,
     *,
     target_lang: str = "ja",
+    ui_lang: str = "ja",
     max_length: int = 1900,
 ) -> str:
     source_lang = status.source_lang or status.translation_source_lang or "unknown"
@@ -288,12 +383,14 @@ def build_translation_message(
     quoted_text = "\n".join(f"> {line}" if line else ">" for line in translated_text.splitlines())
     display_url = to_fxtwitter_url(original_url)
 
-    message = (
-        f"**{author} の投稿を翻訳しました ({source_lang} -> {target})**\n"
-        f"{quoted_text}\n"
-        f"{display_url}"
+    header = get_ui_message(
+        "translated_header",
+        ui_lang=ui_lang,
+        author=author,
+        source=source_lang,
+        target=target,
     )
-    return _truncate(message, max_length)
+    return _truncate(f"{header}\n{quoted_text}\n{display_url}", max_length)
 
 
 def _string_or_none(value: Any) -> str | None:
