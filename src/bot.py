@@ -396,6 +396,19 @@ def register_commands(bot: TwitterTranslateBot) -> None:
                 break
 
     @bot.tree.command(
+        name="help",
+        description=get_ui_message("help_desc", ui_lang="ja"),
+    )
+    async def help_command(interaction: discord.Interaction) -> None:
+        embed = discord.Embed(
+            title=get_ui_message("help_title", ui_lang=bot.ui_lang),
+            description=get_ui_message("help_body", ui_lang=bot.ui_lang).replace("\\n", "\n"),
+            color=discord.Color.blue()
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+    help_command.description_localizations = get_locs("help_desc")
+
+    @bot.tree.command(
         name="ping",
         description=get_ui_message("ping_desc", ui_lang="ja"),
     )
