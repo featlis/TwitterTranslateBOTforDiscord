@@ -108,6 +108,41 @@ class Settings:
         )
 
 
+class DiscordTranslator(app_commands.Translator):
+    """Discordのクライアント言語に合わせてコマンドの説明文などを翻訳するクラス"""
+    async def translate(
+        self,
+        string: app_commands.locale_str,
+        locale: discord.Locale,
+        context: app_commands.TranslationContext
+    ) -> str | None:
+        # ロケールから先頭の言語コードを取得 (en-US -> en)
+        lang_key = locale.value.split('-')[0]
+
+        # 指定の4か国語（ja, zh, ko, en）に含まれない場合は英語(en)に倒す
+        if lang_key not in UI_MESSAGES:
+            lang_key = "en"
+
+        key = string.message
+
+        # コマンドの説明文(_desc)と言語選択肢(lang_name_)のみを翻訳対象とする。
+        # これにより、コマンド名(ping, help等)がUI_MESSAGES内の応答メッセージと衝突して
+        # 長さ制限エラー(HTTP 400 50035)を起こすのを防ぐ。
+        if not (key.endswith("_desc") or key.startswith("lang_name_")):
+            return None
+
+        # 指定した言語の辞書にキーがない場合は、英語の辞書から取得を試みる
+        translated = UI_MESSAGES[lang_key].get(key) or UI_MESSAGES["en"].get(key)
+
+        # キーが辞書に存在し、かつ言語選択肢（lang_name_xx）の場合は "(code)" を付与
+        if translated is not None and key.startswith("lang_name_"):
+            # 言語選択肢の場合、"日本語 (ja)" の形式にする
+            code = key.split("_")[-1]
+            return f"{translated} ({code})"
+
+        return translated
+
+
 class TwitterTranslateBot(commands.Bot):
     def __init__(self, settings: Settings) -> None:
         intents = discord.Intents.default()
@@ -124,16 +159,19 @@ class TwitterTranslateBot(commands.Bot):
 
     async def setup_hook(self) -> None:
         self.http_session = aiohttp.ClientSession()
+        # 翻訳クラスを登録
+        await self.tree.set_translator(DiscordTranslator())
+
         register_commands(self)
 
         if self.settings.guild_id:
             guild = discord.Object(id=self.settings.guild_id)
             self.tree.copy_global_to(guild=guild)
             await self.tree.sync(guild=guild)
-            logging.info("Synced slash commands to guild %s.", self.settings.guild_id)
+            logging.info("Successfully synced slash commands to guild %s.", self.settings.guild_id)
         else:
             await self.tree.sync()
-            logging.info("Synced slash commands globally.")
+            logging.info("Successfully synced slash commands globally.")
 
     async def close(self) -> None:
         if self.http_session and not self.http_session.closed:
@@ -142,18 +180,6 @@ class TwitterTranslateBot(commands.Bot):
 
     async def on_ready(self) -> None:
         logging.info("Logged in as %s (ID: %s).", self.user, self.user.id if self.user else "unknown")
-        if self.settings.guild_id or self._commands_synced_to_joined_guilds:
-            return
-
-        # NOTE: Syncing to each guild individually on startup can be slow.
-        # For global usage without DISCORD_GUILD_ID, global sync in setup_hook is usually sufficient.
-        self._commands_synced_to_joined_guilds = True
-        if len(self.guilds) < 10:  # Only sync if joined to few guilds to avoid rate limits
-            for guild in self.guilds:
-                discord_guild = discord.Object(id=guild.id)
-                self.tree.copy_global_to(guild=discord_guild)
-                await self.tree.sync(guild=discord_guild)
-                logging.info("Synced slash commands to joined guild %s (%s).", guild.name, guild.id)
 
     async def on_message(self, message: discord.Message) -> None:
         if message.author.bot:
@@ -264,12 +290,6 @@ class TwitterTranslateBot(commands.Bot):
         )
 
 
-LANGUAGE_CHOICES = [
-    app_commands.Choice(name=f"{language_label(code)} ({code})", value=code)
-    for code in supported_language_codes()
-]
-
-
 class TranslationLanguageView(discord.ui.View):
     def __init__(
         self,
@@ -345,74 +365,36 @@ class TranslationLanguageView(discord.ui.View):
 
 
 def register_commands(bot: TwitterTranslateBot) -> None:
-    def get_locs(key: str, **kwargs) -> dict[discord.Locale, str]:
-        """Helper to create localized command descriptions for Discord."""
-        locs = {}
-        # 対応する4つの言語キー
-        target_langs = ["ja", "en", "zh", "ko"]
-        
-        for lang_key in target_langs:
-            if lang_key in UI_MESSAGES and key in UI_MESSAGES[lang_key]:
-                text = get_ui_message(key, ui_lang=lang_key, **kwargs)
-                # Discordの全ロケールを走査して、言語コードが一致するものに設定
-                # 例: 'en' であれば 'en-US' と 'en-GB' の両方に適用
-                for loc in discord.Locale:
-                    # ロケール値 (例: 'en-US') の先頭が一致するか確認
-                    if loc.value.split('-')[0] == lang_key:
-                        locs[loc] = text
-                    # 中国語の特殊なケース (zh-CN, zh-TW) の補完
-                    elif lang_key == "zh" and loc.value.startswith("zh"):
-                        locs[loc] = text
-        return locs
+    def get_interaction_lang(interaction: discord.Interaction) -> str:
+        """ユーザーのクライアント言語を判定して、対応していればそのコードを、そうでなければBOTのデフォルトUI言語を返します。"""
+        user_lang = interaction.locale.value.split('-')[0]
+        return user_lang if user_lang in ["ja", "zh", "ko"] else "en"
 
-    def get_choice_locs(code: str) -> dict[discord.Locale, str]:
-        """Helper to create localized choice names."""
-        locs = {}
-        lang_key = f"lang_name_{code}"
-        target_langs = ["ja", "en", "zh", "ko"]
-
-        for lang_key_ui in target_langs:
-            if lang_key_ui in UI_MESSAGES and lang_key in UI_MESSAGES[lang_key_ui]:
-                label = UI_MESSAGES[lang_key_ui][lang_key]
-                for loc in discord.Locale:
-                    if loc.value.split('-')[0] == lang_key_ui:
-                        locs[loc] = f"{label} ({code})"
-                    elif lang_key_ui == "zh" and loc.value.startswith("zh"):
-                        locs[loc] = f"{label} ({code})"
-        return locs
-
-    localized_choices = []
-    for code in supported_language_codes():
-        name = f"{LANGUAGE_OPTIONS[code]['label']} ({code})"
-        choice = app_commands.Choice(name=name, value=code)
-        choice.name_localizations = get_choice_locs(code)
-        localized_choices.append(choice)
-
-    def set_param_locs(command: app_commands.Command, param_name: str, key: str):
-        """Helper to safely set localizations for a specific parameter."""
-        for param in command.parameters:
-            if param.name == param_name:
-                param.description_localizations = get_locs(key)
-                break
+    # 翻訳用キーを使用した選択肢の作成
+    localized_choices = [
+        app_commands.Choice(name=app_commands.locale_str(f"lang_name_{code}"), value=code)
+        for code in supported_language_codes()
+    ]
 
     @bot.tree.command(
         name="help",
-        description=get_ui_message("help_desc", ui_lang="ja"),
+        description=app_commands.locale_str("help_desc"),
     )
     async def help_command(interaction: discord.Interaction) -> None:
+        lang = get_interaction_lang(interaction)
         embed = discord.Embed(
-            title=get_ui_message("help_title", ui_lang=bot.ui_lang),
-            description=get_ui_message("help_body", ui_lang=bot.ui_lang).replace("\\n", "\n"),
+            title=get_ui_message("help_title", ui_lang=lang),
+            description=get_ui_message("help_body", ui_lang=lang).replace("\\n", "\n"),
             color=discord.Color.blue()
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
-    help_command.description_localizations = get_locs("help_desc")
 
     @bot.tree.command(
         name="ping",
-        description=get_ui_message("ping_desc", ui_lang="ja"),
+        description=app_commands.locale_str("ping_desc"),
     )
     async def ping(interaction: discord.Interaction) -> None:
+        lang = get_interaction_lang(interaction)
         started_at = time.perf_counter()
         await interaction.response.defer(ephemeral=True, thinking=True)
         interaction_ms = round((time.perf_counter() - started_at) * 1000)
@@ -421,26 +403,26 @@ def register_commands(bot: TwitterTranslateBot) -> None:
         await interaction.followup.send(
             get_ui_message(
                 "ping",
-                ui_lang=bot.ui_lang,
+                ui_lang=lang,
                 websocket_ms=websocket_ms,
                 interaction_ms=interaction_ms,
             ),
             ephemeral=True,
         )
-    ping.description_localizations = get_locs("ping_desc")
 
     @bot.tree.command(
         name="tweet_test",
-        description=get_ui_message("tweet_test_desc", ui_lang="ja"),
+        description=app_commands.locale_str("tweet_test_desc"),
     )
-    @app_commands.describe(url=get_ui_message("url_param_desc", ui_lang="ja"))
+    @app_commands.describe(url=app_commands.locale_str("url_param_desc"))
     async def tweet_test(interaction: discord.Interaction, url: str) -> None:
+        lang = get_interaction_lang(interaction)
         await interaction.response.defer(ephemeral=True, thinking=True)
 
         links = extract_tweet_links(url)
         if not links:
             await interaction.followup.send(
-                get_ui_message("invalid_url", ui_lang=bot.ui_lang),
+                get_ui_message("invalid_url", ui_lang=lang),
                 ephemeral=True,
             )
             return
@@ -450,7 +432,7 @@ def register_commands(bot: TwitterTranslateBot) -> None:
             status = await bot.fetch_tweet(link)
         except TweetFetchError as exc:
             await interaction.followup.send(
-                get_ui_message("fetch_error", ui_lang=bot.ui_lang, exc=exc),
+                get_ui_message("fetch_error", ui_lang=lang, exc=exc),
                 ephemeral=True,
             )
             return
@@ -458,20 +440,20 @@ def register_commands(bot: TwitterTranslateBot) -> None:
             logging.exception("Unexpected error during /tweet_test for %s.", link.tweet_id)
             await interaction.followup.send(
                 get_ui_message(
-                    "unexpected_error", ui_lang=bot.ui_lang, type=type(exc).__name__
+                    "unexpected_error", ui_lang=lang, type=type(exc).__name__
                 ),
                 ephemeral=True,
             )
             return
 
-        source_lang = status.source_lang or status.translation_source_lang or "unknown"
+        source_lang = status.source_lang or status.translation_source_lang or "???"
         has_translation = bool(status.translation_text)
 
         if status_needs_translation(status, bot.default_target_lang):
             await interaction.followup.send(
-                get_ui_message("test_success", ui_lang=bot.ui_lang) + "\n\n"
+                get_ui_message("test_success", ui_lang=lang) + "\n\n"
                 + build_translation_message(
-                    status, link.url, target_lang=bot.default_target_lang, ui_lang=bot.ui_lang
+                    status, link.url, target_lang=bot.default_target_lang, ui_lang=lang
                 ),
                 view=TranslationLanguageView(bot, link, selected_lang=bot.default_target_lang),
                 ephemeral=True,
@@ -480,20 +462,20 @@ def register_commands(bot: TwitterTranslateBot) -> None:
 
         if status.has_video:
             await interaction.followup.send(
-                get_ui_message("test_video", ui_lang=bot.ui_lang) + "\n\n"
+                get_ui_message("test_video", ui_lang=lang) + "\n\n"
                 + build_video_link_message(link.url),
                 ephemeral=True,
             )
             return
 
-        reason = get_ui_message("reason_api", ui_lang=bot.ui_lang)
+        reason = get_ui_message("reason_api", ui_lang=lang)
         if is_target_language(source_lang, bot.default_target_lang):
-            reason = get_ui_message("reason_lang", ui_lang=bot.ui_lang)
+            reason = get_ui_message("reason_lang", ui_lang=lang)
 
         await interaction.followup.send(
             "\n".join(
                 [
-                    get_ui_message("test_skipped", ui_lang=bot.ui_lang),
+                    get_ui_message("test_skipped", ui_lang=lang),
                     f"Reason: {reason}",
                     f"tweet_id: `{status.tweet_id}`",
                     f"source_lang: `{source_lang}`",
@@ -502,25 +484,24 @@ def register_commands(bot: TwitterTranslateBot) -> None:
             ),
             ephemeral=True,
         )
-    tweet_test.description_localizations = get_locs("tweet_test_desc")
-    set_param_locs(tweet_test, "url", "url_param_desc")
 
     @bot.tree.command(
         name="translate_tweet",
-        description=get_ui_message("translate_tweet_desc", ui_lang="ja"),
+        description=app_commands.locale_str("translate_tweet_desc"),
     )
     @app_commands.describe(
-        url=get_ui_message("url_param_desc", ui_lang="ja"),
-        lang=get_ui_message("lang_param_desc", ui_lang="ja")
+        url=app_commands.locale_str("url_param_desc"),
+        lang=app_commands.locale_str("lang_param_desc")
     )
     @app_commands.choices(lang=localized_choices)
     async def translate_tweet(interaction: discord.Interaction, url: str, lang: str) -> None:
+        ui_lang = get_interaction_lang(interaction)
         await interaction.response.defer(thinking=True)
 
         links = extract_tweet_links(url)
         if not links:
             await interaction.followup.send(
-                get_ui_message("invalid_url", ui_lang=bot.ui_lang),
+                get_ui_message("invalid_url", ui_lang=ui_lang),
                 ephemeral=True,
             )
             return
@@ -531,7 +512,7 @@ def register_commands(bot: TwitterTranslateBot) -> None:
             status = await bot.fetch_tweet(link, target_lang)
         except TweetFetchError as exc:
             await interaction.followup.send(
-                get_ui_message("fetch_error", ui_lang=bot.ui_lang, exc=exc),
+                get_ui_message("fetch_error", ui_lang=ui_lang, exc=exc),
                 ephemeral=True,
             )
             return
@@ -539,7 +520,7 @@ def register_commands(bot: TwitterTranslateBot) -> None:
             logging.exception("Unexpected error during /translate_tweet for %s.", link.tweet_id)
             await interaction.followup.send(
                 get_ui_message(
-                    "unexpected_error", ui_lang=bot.ui_lang, type=type(exc).__name__
+                    "unexpected_error", ui_lang=ui_lang, type=type(exc).__name__
                 ),
                 ephemeral=True,
             )
@@ -547,7 +528,7 @@ def register_commands(bot: TwitterTranslateBot) -> None:
 
         if status_needs_translation(status, target_lang):
             await interaction.followup.send(
-                build_translation_message(status, link.url, target_lang=target_lang, ui_lang=bot.ui_lang),
+                build_translation_message(status, link.url, target_lang=target_lang, ui_lang=ui_lang),
                 view=TranslationLanguageView(bot, link, selected_lang=target_lang),
                 allowed_mentions=discord.AllowedMentions.none(),
             )
@@ -564,30 +545,28 @@ def register_commands(bot: TwitterTranslateBot) -> None:
         await interaction.followup.send(
             get_ui_message(
                 "no_translation",
-                ui_lang=bot.ui_lang,
+                ui_lang=ui_lang,
                 lang=language_label(target_lang),
             ),
             ephemeral=True,
         )
-    translate_tweet.description_localizations = get_locs("translate_tweet_desc")
-    set_param_locs(translate_tweet, "url", "url_param_desc")
-    set_param_locs(translate_tweet, "lang", "lang_param_desc")
 
     @bot.tree.command(
         name="set_default_lang",
-        description=get_ui_message("set_default_lang_desc", ui_lang="ja"),
+        description=app_commands.locale_str("set_default_lang_desc"),
     )
     @app_commands.default_permissions(manage_guild=True)
-    @app_commands.describe(lang=get_ui_message("lang_param_desc", ui_lang="ja"))
+    @app_commands.describe(lang=app_commands.locale_str("lang_param_desc"))
     @app_commands.choices(lang=localized_choices)
     async def set_default_lang(interaction: discord.Interaction, lang: str) -> None:
+        ui_lang = get_interaction_lang(interaction)
         try:
             target_lang = bot.set_default_target_lang(lang)
         except Exception as exc:
             logging.exception("Could not update default language.")
             await interaction.response.send_message(
                 get_ui_message(
-                    "config_save_error", ui_lang=bot.ui_lang, type=type(exc).__name__
+                    "config_save_error", ui_lang=ui_lang, type=type(exc).__name__
                 ),
                 ephemeral=True,
             )
@@ -596,30 +575,29 @@ def register_commands(bot: TwitterTranslateBot) -> None:
         await interaction.response.send_message(
             get_ui_message(
                 "set_default_lang",
-                ui_lang=bot.ui_lang,
+                ui_lang=ui_lang,
                 label=language_label(target_lang),
                 code=target_lang,
             ),
             ephemeral=True,
         )
-    set_default_lang.description_localizations = get_locs("set_default_lang_desc")
-    set_param_locs(set_default_lang, "lang", "lang_param_desc")
 
     @bot.tree.command(
         name="set_ui_lang",
-        description=get_ui_message("set_ui_lang_desc", ui_lang="ja"),
+        description=app_commands.locale_str("set_ui_lang_desc"),
     )
     @app_commands.default_permissions(manage_guild=True)
-    @app_commands.describe(lang=get_ui_message("lang_param_desc", ui_lang="ja"))
+    @app_commands.describe(lang=app_commands.locale_str("lang_param_desc"))
     @app_commands.choices(lang=localized_choices)
     async def set_ui_lang(interaction: discord.Interaction, lang: str) -> None:
+        current_ui_lang = get_interaction_lang(interaction)
         try:
             target_lang = bot.set_ui_lang(lang)
         except Exception as exc:
             logging.exception("Could not update UI language.")
             await interaction.response.send_message(
                 get_ui_message(
-                    "config_save_error", ui_lang=bot.ui_lang, type=type(exc).__name__
+                    "config_save_error", ui_lang=current_ui_lang, type=type(exc).__name__
                 ),
                 ephemeral=True,
             )
@@ -634,8 +612,6 @@ def register_commands(bot: TwitterTranslateBot) -> None:
             ),
             ephemeral=False,
         )
-    set_ui_lang.description_localizations = get_locs("set_ui_lang_desc")
-    set_param_locs(set_ui_lang, "lang", "lang_param_desc")
 
 
 def _message_text_candidates(message: discord.Message) -> list[str]:
