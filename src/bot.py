@@ -245,9 +245,12 @@ class TwitterTranslateBot(commands.Bot):
                 continue
 
             try:
+                source_lang = status.source_lang or status.translation_source_lang
                 await message.reply(
                     response_text,
-                    view=TranslationLanguageView(self, link, selected_lang=self.default_target_lang),
+                    view=TranslationLanguageView(
+                        self, link, selected_lang=self.default_target_lang, exclude_lang=source_lang
+                    ),
                     mention_author=False,
                     allowed_mentions=discord.AllowedMentions.none(),
                 )
@@ -301,13 +304,25 @@ class TranslationLanguageView(discord.ui.View):
         link: TweetLink,
         *,
         selected_lang: str | None = None,
+        exclude_lang: str | None = None,
     ) -> None:
         super().__init__(timeout=None)
         self.bot = bot
         self.link = link
+        self.exclude_lang = exclude_lang
         selected = canonical_language_code(selected_lang) if selected_lang else None
 
+        excluded = None
+        if exclude_lang:
+            try:
+                excluded = canonical_language_code(exclude_lang)
+            except ValueError:
+                # サポート外の言語の場合はボタン除外を行わない
+                pass
+
         for lang in supported_language_codes():
+            if lang == excluded:
+                continue
             button = discord.ui.Button(
                 label=language_label(lang),
                 style=discord.ButtonStyle.primary if lang == selected else discord.ButtonStyle.secondary,
@@ -338,6 +353,7 @@ class TranslationLanguageView(discord.ui.View):
                 )
                 return
 
+            source_lang = status.source_lang or status.translation_source_lang
             if status_needs_translation(status, target_lang):
                 content = build_translation_message(
                     status, self.link.url, target_lang=target_lang, ui_lang=self.bot.ui_lang
@@ -352,7 +368,9 @@ class TranslationLanguageView(discord.ui.View):
 
             await interaction.message.edit(
                 content=content,
-                view=TranslationLanguageView(self.bot, self.link, selected_lang=target_lang),
+                view=TranslationLanguageView(
+                    self.bot, self.link, selected_lang=target_lang, exclude_lang=source_lang
+                ),
                 allowed_mentions=discord.AllowedMentions.none(),
             )
 
@@ -446,10 +464,13 @@ def register_commands(bot: TwitterTranslateBot) -> None:
             )
             return
 
+        source_lang = status.source_lang or status.translation_source_lang
         if status_needs_translation(status, target_lang):
             await interaction.followup.send(
                 build_translation_message(status, link.url, target_lang=target_lang, ui_lang=ui_lang),
-                view=TranslationLanguageView(bot, link, selected_lang=target_lang),
+                view=TranslationLanguageView(
+                    bot, link, selected_lang=target_lang, exclude_lang=source_lang
+                ),
                 allowed_mentions=discord.AllowedMentions.none(),
             )
             return
@@ -457,7 +478,9 @@ def register_commands(bot: TwitterTranslateBot) -> None:
         if status.has_video:
             await interaction.followup.send(
                 build_video_link_message(link.url),
-                view=TranslationLanguageView(bot, link, selected_lang=target_lang),
+                view=TranslationLanguageView(
+                    bot, link, selected_lang=target_lang, exclude_lang=source_lang
+                ),
                 allowed_mentions=discord.AllowedMentions.none(),
             )
             return
