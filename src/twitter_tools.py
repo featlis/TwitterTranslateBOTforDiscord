@@ -263,9 +263,9 @@ def status_needs_translation(status: TweetStatus, target_lang: str = "ja") -> bo
     source_lang = status.source_lang or status.translation_source_lang
     if is_target_language(source_lang, target_lang):
         return False
-    if not source_lang and text_looks_japanese(status.text):
+    if not source_lang and target_lang == "ja" and text_looks_japanese(status.text):
         return False
-    return bool(status.translation_text and status.translation_text.strip())
+    return True
 
 
 def to_fxtwitter_url(url: str) -> str:

@@ -220,12 +220,16 @@ class TwitterTranslateBot(commands.Bot):
             response_kind = "translation"
 
             if status_needs_translation(status, self.default_target_lang):
-                response_text = build_translation_message(
-                    status,
-                    link.url,
-                    target_lang=self.default_target_lang,
-                    ui_lang=self.ui_lang,
-                )
+                if status.translation_text:
+                    response_text = build_translation_message(
+                        status,
+                        link.url,
+                        target_lang=self.default_target_lang,
+                        ui_lang=self.ui_lang,
+                    )
+                else:
+                    response_text = build_video_link_message(link.url)
+                    response_kind = "link fallback"
             elif status.has_video:
                 response_text = build_video_link_message(link.url)
                 response_kind = "video link"
@@ -338,18 +342,9 @@ class TranslationLanguageView(discord.ui.View):
                 content = build_translation_message(
                     status, self.link.url, target_lang=target_lang, ui_lang=self.bot.ui_lang
                 )
-            elif status.has_video:
-                content = build_video_link_message(self.link.url)
             else:
-                await interaction.followup.send(
-                    get_ui_message(
-                        "no_translation",
-                        ui_lang=self.bot.ui_lang,
-                        lang=language_label(target_lang),
-                    ),
-                    ephemeral=True,
-                )
-                return
+                # 翻訳が取得できない、あるいは元の言語と同じ場合はFxTwitterリンクを表示（元言語の表示として機能）
+                content = build_video_link_message(self.link.url)
 
             if interaction.message is None:
                 await interaction.followup.send(content, ephemeral=True)
