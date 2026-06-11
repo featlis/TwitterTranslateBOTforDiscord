@@ -68,7 +68,7 @@ UI_MESSAGES = {
         "lang_name_ko": "韓国語",
         "help_desc": "BOTの使いかたとコマンド一覧を表示します。",
         "help_title": "ヘルプ: コマンド一覧",
-        "help_body": "このBOTは、Twitter/Xのリンクが投稿された際に自動的に翻訳文を返信します。\n\n**コマンド:**\n• **/ping**: 応答速度を測定します。\n• **/translate_tweet [url] [lang]**: 指定した言語へ翻訳します。\n• **/set_default_lang [lang]**: 自動翻訳のデフォルト言語を設定します。\n• **/set_ui_lang [lang]**: BOTの応答言語を設定します。",
+        "help_body": "このBOTは、Twitter/Xのリンクが投稿された際に自動的に翻訳文を返信します。\n\n**コマンド:**\n• **/ping**: 応答速度を測定します。\n• **/tweet_test [url]**: 翻訳のテストを実行します。\n• **/translate_tweet [url] [lang]**: 指定した言語へ翻訳します。\n• **/set_default_lang [lang]**: 自動翻訳のデフォルト言語を設定します。\n• **/set_ui_lang [lang]**: BOTの応答言語を設定します。",
     },
     "en": {
         "translated_header": "**Translated {author}'s post ({source} -> {target})**",
@@ -98,7 +98,7 @@ UI_MESSAGES = {
         "lang_name_ko": "Korean",
         "help_desc": "Show bot usage and command list.",
         "help_title": "Help: Command List",
-        "help_body": "This bot automatically translates Twitter/X links posted in messages.\n\n**Commands:**\n• **/ping**: Measure the bot's response latency.\n• **/translate_tweet [url] [lang]**: Translate a tweet to a specific language.\n• **/set_default_lang [lang]**: Set default translation language.\n• **/set_ui_lang [lang]**: Set bot response language.",
+        "help_body": "This bot automatically translates Twitter/X links posted in messages.\n\n**Commands:**\n• **/ping**: Measure the bot's response latency.\n• **/tweet_test [url]**: Test link fetching and translation.\n• **/translate_tweet [url] [lang]**: Translate a tweet to a specific language.\n• **/set_default_lang [lang]**: Set default translation language.\n• **/set_ui_lang [lang]**: Set bot response language.",
     },
     "zh": {
         "translated_header": "**翻译了 {author} 的推文 ({source} -> {target})**",
@@ -128,7 +128,7 @@ UI_MESSAGES = {
         "lang_name_ko": "韩语",
         "help_desc": "显示 BOT 的用法和命令列表。",
         "help_title": "帮助: 命令列表",
-        "help_body": "该 BOT 在发布 Twitter/X 链接时会自动回复翻译文本。\n\n**命令:**\n• **/ping**: 检查 BOT 的响应速度。\n• **/translate_tweet [url] [lang]**: 将推文翻译成指定语言。\n• **/set_default_lang [lang]**: 设置自动翻译的默认语言。\n• **/set_ui_lang [lang]**: 设置 BOT の响应语言。",
+        "help_body": "该 BOT 在发布 Twitter/X 链接时会自动回复翻译文本。\n\n**命令:**\n• **/ping**: 检查 BOT 的响应速度。\n• **/tweet_test [url]**: 测试链接获取和翻译。\n• **/translate_tweet [url] [lang]**: 将推文翻译成指定语言。\n• **/set_default_lang [lang]**: 设置自动翻译的默认语言。\n• **/set_ui_lang [lang]**: 设置 BOT 的响应语言。",
     },
     "ko": {
         "translated_header": "**{author} 님의 게시물을 번역했습니다 ({source} -> {target})**",
@@ -158,7 +158,7 @@ UI_MESSAGES = {
         "lang_name_ko": "한국어",
         "help_desc": "BOT 사용법과 명령어 목록을 표시합니다.",
         "help_title": "도움말: 명령어 목록",
-        "help_body": "이 봇은 Twitter/X 링크가 게시될 때 자동으로 번역문을 회신합니다.\n\n**명령어:**\n• **/ping**: BOT의 응답 속도를 확인합니다.\n• **/translate_tweet [url] [lang]**: 지정한 언어로 트윗을 번역합니다.\n• **/set_default_lang [lang]**: 자동 번역의 기본 언어를 설정합니다.\n• **/set_ui_lang [lang]**: BOT의 응답 언어를 설정합니다。",
+        "help_body": "이 봇은 Twitter/X 링크가 게시될 때 자동으로 번역문을 회신합니다.\n\n**명령어:**\n• **/ping**: BOT의 응답 속도를 확인합니다.\n• **/tweet_test [url]**: 링크 가져오기 및 번역을 테스트합니다.\n• **/translate_tweet [url] [lang]**: 지정한 언어로 트윗을 번역합니다.\n• **/set_default_lang [lang]**: 자동 번역의 기본 언어를 설정합니다.\n• **/set_ui_lang [lang]**: BOT의 응답 언어를 설정합니다.",
     }
 }
 
@@ -415,7 +415,7 @@ def build_translation_message(
 
     translated_text = (status.translation_text or "").strip()
     translated_text = html.unescape(translated_text)
-    translated_text = _truncate(translated_text, max(200, max_length - 320))
+    translated_text = _truncate(translated_text, max(1, max_length - 400)) # 余裕を少し広めに
     quoted_text = "\n".join(f"> {line}" if line else ">" for line in translated_text.splitlines())
     display_url = to_fxtwitter_url(original_url)
 

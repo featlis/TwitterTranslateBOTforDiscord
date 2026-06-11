@@ -535,7 +535,7 @@ def register_commands(bot: TwitterTranslateBot) -> None:
                 label=language_label(target_lang),
                 code=target_lang,
             ),
-            ephemeral=False,
+            ephemeral=True,
         )
 
 
