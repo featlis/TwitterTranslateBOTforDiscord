@@ -219,6 +219,9 @@ class TwitterTranslateBot(commands.Bot):
             response_text: str | None = None
             response_kind = "translation"
 
+            source_lang = status.source_lang or status.translation_source_lang
+            view = None
+
             if status_needs_translation(status, self.default_target_lang):
                 if status.translation_text:
                     response_text = build_translation_message(
@@ -226,6 +229,9 @@ class TwitterTranslateBot(commands.Bot):
                         link.url,
                         target_lang=self.default_target_lang,
                         ui_lang=self.ui_lang,
+                    )
+                    view = TranslationLanguageView(
+                        self, link, selected_lang=self.default_target_lang, exclude_lang=source_lang
                     )
                 else:
                     response_text = build_video_link_message(link.url)
@@ -245,12 +251,9 @@ class TwitterTranslateBot(commands.Bot):
                 continue
 
             try:
-                source_lang = status.source_lang or status.translation_source_lang
                 await message.reply(
                     response_text,
-                    view=TranslationLanguageView(
-                        self, link, selected_lang=self.default_target_lang, exclude_lang=source_lang
-                    ),
+                    view=view,
                     mention_author=False,
                     allowed_mentions=discord.AllowedMentions.none(),
                 )
@@ -354,23 +357,22 @@ class TranslationLanguageView(discord.ui.View):
                 return
 
             source_lang = status.source_lang or status.translation_source_lang
+            view = None
+
             if status_needs_translation(status, target_lang):
                 content = build_translation_message(
                     status, self.link.url, target_lang=target_lang, ui_lang=self.bot.ui_lang
+                )
+                view = TranslationLanguageView(
+                    self.bot, self.link, selected_lang=target_lang, exclude_lang=source_lang
                 )
             else:
                 # 翻訳が取得できない、あるいは元の言語と同じ場合はFxTwitterリンクを表示（元言語の表示として機能）
                 content = build_video_link_message(self.link.url)
 
-            if interaction.message is None:
-                await interaction.followup.send(content, ephemeral=True)
-                return
-
             await interaction.message.edit(
                 content=content,
-                view=TranslationLanguageView(
-                    self.bot, self.link, selected_lang=target_lang, exclude_lang=source_lang
-                ),
+                view=view,
                 allowed_mentions=discord.AllowedMentions.none(),
             )
 
@@ -466,11 +468,12 @@ def register_commands(bot: TwitterTranslateBot) -> None:
 
         source_lang = status.source_lang or status.translation_source_lang
         if status_needs_translation(status, target_lang):
+            view = TranslationLanguageView(
+                bot, link, selected_lang=target_lang, exclude_lang=source_lang
+            )
             await interaction.followup.send(
                 build_translation_message(status, link.url, target_lang=target_lang, ui_lang=ui_lang),
-                view=TranslationLanguageView(
-                    bot, link, selected_lang=target_lang, exclude_lang=source_lang
-                ),
+                view=view,
                 allowed_mentions=discord.AllowedMentions.none(),
             )
             return
@@ -478,9 +481,7 @@ def register_commands(bot: TwitterTranslateBot) -> None:
         if status.has_video:
             await interaction.followup.send(
                 build_video_link_message(link.url),
-                view=TranslationLanguageView(
-                    bot, link, selected_lang=target_lang, exclude_lang=source_lang
-                ),
+                view=None,
                 allowed_mentions=discord.AllowedMentions.none(),
             )
             return
