@@ -86,6 +86,19 @@ class TwitterToolsTest(unittest.TestCase):
 
         self.assertTrue(status_needs_translation(status))
 
+    def test_extract_tweet_links_supports_i_web_status(self) -> None:
+        links = extract_tweet_links(
+            "Check https://twitter.com/i/web/status/9876543210 and https://x.com/i/status/11223344"
+        )
+        self.assertEqual([link.tweet_id for link in links], ["9876543210", "11223344"])
+        self.assertIsNone(links[0].handle)
+        self.assertIsNone(links[1].handle)
+        self.assertEqual(to_fxtwitter_url(links[0].url), "https://fxtwitter.com/i/status/9876543210")
+        self.assertEqual(
+            to_fxtwitter_url(links[0].url, fallback_handle="author"),
+            "https://fxtwitter.com/author/status/9876543210",
+        )
+
     def test_build_translation_message_quotes_translation(self) -> None:
         status = TweetStatus(
             tweet_id="1",
@@ -103,6 +116,28 @@ class TwitterToolsTest(unittest.TestCase):
         self.assertIn("> 世界", message)
         self.assertIn("https://fxtwitter.com/example/status/1", message)
         self.assertNotIn("https://x.com/example/status/1", message)
+
+    def test_build_translation_message_preserves_display_url_on_long_text(self) -> None:
+        long_text = "\n".join([f"Long line number {i}" for i in range(200)])
+        status = TweetStatus(
+            tweet_id="12345",
+            text="Original tweet",
+            source_lang="en",
+            author_handle="longauthor",
+            translation_text=long_text,
+            translation_target_lang="ja",
+        )
+
+        msg = build_translation_message(
+            status,
+            "https://x.com/longauthor/status/12345",
+            target_lang="ja",
+            max_length=1900,
+        )
+
+        self.assertLessEqual(len(msg), 1900)
+        self.assertTrue(msg.endswith("https://fxtwitter.com/longauthor/status/12345"))
+        self.assertIn("...", msg)
 
 
     def test_parse_tweet_status_reads_raw_text_payload(self) -> None:

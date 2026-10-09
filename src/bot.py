@@ -71,7 +71,7 @@ def _load_config_lang(config_path: Path, key: str, env_value: str) -> str:
         return canonical_language_code(configured_value)
     except ValueError as exc:
         supported = ", ".join(supported_language_codes())
-        raise RuntimeError(f"TARGET_LANG must be one of: {supported}") from exc
+        raise RuntimeError(f"{key.upper()} must be one of: {supported}") from exc
 
 
 @dataclass(frozen=True)
@@ -155,7 +155,6 @@ class TwitterTranslateBot(commands.Bot):
         self.default_target_lang = settings.target_lang
         self.ui_lang = settings.ui_lang
         self.http_session: aiohttp.ClientSession | None = None
-        self._commands_synced_to_joined_guilds = False
 
     async def setup_hook(self) -> None:
         self.http_session = aiohttp.ClientSession()
@@ -357,9 +356,7 @@ class TranslationLanguageView(discord.ui.View):
                 return
 
             source_lang = status.source_lang or status.translation_source_lang
-            view = None
-
-            if status_needs_translation(status, target_lang):
+            if status_needs_translation(status, target_lang) and status.translation_text:
                 content = build_translation_message(
                     status, self.link.url, target_lang=target_lang, ui_lang=self.bot.ui_lang
                 )
@@ -368,13 +365,23 @@ class TranslationLanguageView(discord.ui.View):
                 )
             else:
                 # 翻訳が取得できない、あるいは元の言語と同じ場合はFxTwitterリンクを表示（元言語の表示として機能）
-                content = build_video_link_message(self.link.url)
+                content = build_video_link_message(self.link.url, fallback_handle=status.author_handle)
+                view = TranslationLanguageView(
+                    self.bot, self.link, selected_lang=target_lang, exclude_lang=source_lang
+                )
 
-            await interaction.message.edit(
-                content=content,
-                view=view,
-                allowed_mentions=discord.AllowedMentions.none(),
-            )
+            if interaction.message is None:
+                await interaction.followup.send(content, ephemeral=True)
+                return
+
+            try:
+                await interaction.message.edit(
+                    content=content,
+                    view=view,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+            except discord.HTTPException:
+                logging.exception("Failed to update message for tweet %s.", self.link.tweet_id)
 
         return callback
 
@@ -467,7 +474,7 @@ def register_commands(bot: TwitterTranslateBot) -> None:
             return
 
         source_lang = status.source_lang or status.translation_source_lang
-        if status_needs_translation(status, target_lang):
+        if status_needs_translation(status, target_lang) and status.translation_text:
             view = TranslationLanguageView(
                 bot, link, selected_lang=target_lang, exclude_lang=source_lang
             )
@@ -480,7 +487,7 @@ def register_commands(bot: TwitterTranslateBot) -> None:
 
         if status.has_video:
             await interaction.followup.send(
-                build_video_link_message(link.url),
+                build_video_link_message(link.url, fallback_handle=status.author_handle),
                 view=None,
                 allowed_mentions=discord.AllowedMentions.none(),
             )

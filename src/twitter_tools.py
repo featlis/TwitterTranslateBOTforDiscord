@@ -11,7 +11,7 @@ DEFAULT_FXTWITTER_API_BASE = "https://api.fxtwitter.com/2/status"
 TWEET_URL_RE = re.compile(
     r"https?://(?:www\.|mobile\.)?"
     r"(?P<domain>twitter\.com|x\.com|fxtwitter\.com|fixupx\.com|vxtwitter\.com)"
-    r"/(?P<handle>[A-Za-z0-9_]{1,15}|i)/status(?:es)?/(?P<tweet_id>\d+)"
+    r"/(?:(?P<handle>[A-Za-z0-9_]{1,15})|i(?:/web)?)/status(?:es)?/(?P<tweet_id>\d+)"
     r"(?:[/?#][^\s<>]*)?",
     re.IGNORECASE,
 )
@@ -68,7 +68,7 @@ UI_MESSAGES = {
         "lang_name_ko": "韓国語",
         "help_desc": "BOTの使いかたとコマンド一覧を表示します。",
         "help_title": "ヘルプ: コマンド一覧",
-        "help_body": "このBOTは、Twitter/Xのリンクが投稿された際に自動的に翻訳文を返信します。\n\n**コマンド:**\n• **/ping**: 応答速度を測定します。\n• **/tweet_test [url]**: 翻訳のテストを実行します。\n• **/translate_tweet [url] [lang]**: 指定した言語へ翻訳します。\n• **/set_default_lang [lang]**: 自動翻訳のデフォルト言語を設定します。\n• **/set_ui_lang [lang]**: BOTの応答言語を設定します。",
+        "help_body": "このBOTは、Twitter/Xのリンクが投稿された際に自動的に翻訳文を返信します。\n\n**コマンド:**\n• **/ping**: 応答速度を測定します。\n• **/translate_tweet [url] [lang]**: 指定した言語へ翻訳します。\n• **/set_default_lang [lang]**: 自動翻訳のデフォルト言語を設定します。\n• **/set_ui_lang [lang]**: BOTの応答言語を設定します。",
     },
     "en": {
         "translated_header": "**Translated {author}'s post ({source} -> {target})**",
@@ -98,13 +98,13 @@ UI_MESSAGES = {
         "lang_name_ko": "Korean",
         "help_desc": "Show bot usage and command list.",
         "help_title": "Help: Command List",
-        "help_body": "This bot automatically translates Twitter/X links posted in messages.\n\n**Commands:**\n• **/ping**: Measure the bot's response latency.\n• **/tweet_test [url]**: Test link fetching and translation.\n• **/translate_tweet [url] [lang]**: Translate a tweet to a specific language.\n• **/set_default_lang [lang]**: Set default translation language.\n• **/set_ui_lang [lang]**: Set bot response language.",
+        "help_body": "This bot automatically translates Twitter/X links posted in messages.\n\n**Commands:**\n• **/ping**: Measure the bot's response latency.\n• **/translate_tweet [url] [lang]**: Translate a tweet to a specific language.\n• **/set_default_lang [lang]**: Set default translation language.\n• **/set_ui_lang [lang]**: Set bot response language.",
     },
     "zh": {
         "translated_header": "**翻译了 {author} 的推文 ({source} -> {target})**",
         "fetch_error": "无法获取推文: `{exc}`",
         "unexpected_error": "发生错误: `{type}`",
-        "no_translation": "无法获取 {lang} 的翻译推文可能已经是该语言，或者翻译 API 未返回内容。",
+        "no_translation": "无法获取 {lang} 的翻译。推文可能已经是该语言，或者翻译 API 未返回内容。",
         "invalid_url": "无法识别为 Twitter/X 链接。请尝试 `https://x.com/user/status/123...`。",
         "ping": "Pong! WebSocket: `{websocket_ms}ms` / Interaction: `{interaction_ms}ms`",
         "test_success": "获取并翻译成功。",
@@ -128,7 +128,7 @@ UI_MESSAGES = {
         "lang_name_ko": "韩语",
         "help_desc": "显示 BOT 的用法和命令列表。",
         "help_title": "帮助: 命令列表",
-        "help_body": "该 BOT 在发布 Twitter/X 链接时会自动回复翻译文本。\n\n**命令:**\n• **/ping**: 检查 BOT 的响应速度。\n• **/tweet_test [url]**: 测试链接获取和翻译。\n• **/translate_tweet [url] [lang]**: 将推文翻译成指定语言。\n• **/set_default_lang [lang]**: 设置自动翻译的默认语言。\n• **/set_ui_lang [lang]**: 设置 BOT 的响应语言。",
+        "help_body": "该 BOT 在发布 Twitter/X 链接时会自动回复翻译文本。\n\n**命令:**\n• **/ping**: 检查 BOT 的响应速度。\n• **/translate_tweet [url] [lang]**: 将推文翻译成指定语言。\n• **/set_default_lang [lang]**: 设置自动翻译的默认语言。\n• **/set_ui_lang [lang]**: 设置 BOT 的响应语言。",
     },
     "ko": {
         "translated_header": "**{author} 님의 게시물을 번역했습니다 ({source} -> {target})**",
@@ -158,7 +158,7 @@ UI_MESSAGES = {
         "lang_name_ko": "한국어",
         "help_desc": "BOT 사용법과 명령어 목록을 표시합니다.",
         "help_title": "도움말: 명령어 목록",
-        "help_body": "이 봇은 Twitter/X 링크가 게시될 때 자동으로 번역문을 회신합니다.\n\n**명령어:**\n• **/ping**: BOT의 응답 속도를 확인합니다.\n• **/tweet_test [url]**: 링크 가져오기 및 번역을 테스트합니다.\n• **/translate_tweet [url] [lang]**: 지정한 언어로 트윗을 번역합니다.\n• **/set_default_lang [lang]**: 자동 번역의 기본 언어를 설정합니다.\n• **/set_ui_lang [lang]**: BOT의 응답 언어를 설정합니다.",
+        "help_body": "이 봇은 Twitter/X 링크가 게시될 때 자동으로 번역문을 회신합니다.\n\n**명령어:**\n• **/ping**: BOT의 응답 속도를 확인합니다.\n• **/translate_tweet [url] [lang]**: 지정한 언어로 트윗을 번역합니다.\n• **/set_default_lang [lang]**: 자동 번역의 기본 언어를 설정합니다.\n• **/set_ui_lang [lang]**: BOT의 응답 언어를 설정합니다.",
     }
 }
 
@@ -210,7 +210,7 @@ def extract_tweet_links(text: str) -> list[TweetLink]:
             TweetLink(
                 tweet_id=tweet_id,
                 url=match.group(0),
-                handle=None if handle.lower() == "i" else handle,
+                handle=None if (not handle or handle.lower() == "i") else handle,
             )
         )
 
@@ -268,15 +268,18 @@ def status_needs_translation(status: TweetStatus, target_lang: str = "ja") -> bo
     return True
 
 
-def to_fxtwitter_url(url: str) -> str:
+def to_fxtwitter_url(url: str, fallback_handle: str | None = None) -> str:
     match = TWEET_URL_RE.search(url)
     if not match:
         return url
-    return f"https://fxtwitter.com/{match.group('handle')}/status/{match.group('tweet_id')}"
+    handle = match.group("handle") or fallback_handle or "i"
+    if handle.lower() == "i" and fallback_handle:
+        handle = fallback_handle
+    return f"https://fxtwitter.com/{handle}/status/{match.group('tweet_id')}"
 
 
-def build_video_link_message(original_url: str) -> str:
-    return to_fxtwitter_url(original_url)
+def build_video_link_message(original_url: str, fallback_handle: str | None = None) -> str:
+    return to_fxtwitter_url(original_url, fallback_handle=fallback_handle)
 
 
 async def fetch_tweet_status(
@@ -413,12 +416,7 @@ def build_translation_message(
     target = language_label(target_lang)
     author = f"@{status.author_handle}" if status.author_handle else "Twitter/X"
 
-    translated_text = (status.translation_text or "").strip()
-    translated_text = html.unescape(translated_text)
-    translated_text = _truncate(translated_text, max(1, max_length - 400)) # 余裕を少し広めに
-    quoted_text = "\n".join(f"> {line}" if line else ">" for line in translated_text.splitlines())
-    display_url = to_fxtwitter_url(original_url)
-
+    display_url = to_fxtwitter_url(original_url, fallback_handle=status.author_handle)
     header = get_ui_message(
         "translated_header",
         ui_lang=ui_lang,
@@ -426,7 +424,24 @@ def build_translation_message(
         source=source_lang,
         target=target,
     )
-    return _truncate(f"{header}\n{quoted_text}\n{display_url}", max_length)
+
+    translated_text = (status.translation_text or "").strip()
+    translated_text = html.unescape(translated_text)
+
+    prefix = f"{header}\n"
+    suffix = f"\n{display_url}"
+    max_quote_len = max_length - len(prefix) - len(suffix)
+
+    if not translated_text:
+        return f"{header}\n{display_url}"
+
+    quoted_lines = [f"> {line}" if line else ">" for line in translated_text.splitlines()]
+    quoted_text = "\n".join(quoted_lines)
+
+    if len(quoted_text) > max_quote_len:
+        quoted_text = _truncate(quoted_text, max(1, max_quote_len))
+
+    return f"{prefix}{quoted_text}{suffix}"
 
 
 def _string_or_none(value: Any) -> str | None:
