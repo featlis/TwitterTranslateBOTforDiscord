@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
 
@@ -13,12 +13,18 @@ from src.twitter_tools import (
     extract_tweet_links,
     fetch_tweet_status,
     get_ui_message,
+    is_invalid_translation_text,
     normalize_lang_code,
     payload_has_video_media,
     parse_tweet_status,
     status_needs_translation,
     to_api_language_code,
     to_fxtwitter_url,
+    translate_text_deepl,
+    translate_text_fallback,
+    translate_text_google,
+    translate_text_google_clients5,
+    translate_text_mymemory,
 )
 
 
@@ -236,6 +242,88 @@ class TwitterToolsTest(unittest.TestCase):
         self.assertTrue(msg.endswith("https://fxtwitter.com/example/status/12345"))
         self.assertNotIn("...", msg)
 
+    def test_is_invalid_translation_text_detects_deepl_deprecation_banner(self) -> None:
+        banner = (
+            "You're using an older version of DeepL. To continue using the app, "
+            "please update to the latest version.\n\n"
+            "DeepLの古いバージョンをご利用中です。引き続きご利用いただくには、"
+            "アプリを最新版へアップデートしてください。"
+        )
+        self.assertTrue(is_invalid_translation_text(banner, "A new Docker, but a familiar story."))
+        # Even if original tweet mentions DeepL, multi-language banner is always rejected
+        self.assertTrue(is_invalid_translation_text(banner, "I love DeepL translation"))
+        # Single-language banner when original is unrelated to DeepL is rejected
+        self.assertTrue(
+            is_invalid_translation_text(
+                "You're using an older version of DeepL. Please update.",
+                "Hello world",
+            )
+        )
+        # Normal translation about DeepL is allowed
+        self.assertFalse(is_invalid_translation_text("DeepLの翻訳はとても便利です。", "DeepL translation is useful."))
+        # HTML error page & MyMemory warning are rejected
+        self.assertTrue(is_invalid_translation_text("<!DOCTYPE html><html>Error</html>", "Hello"))
+        self.assertTrue(
+            is_invalid_translation_text("MYMEMORY WARNING: YOU USED ALL AVAILABLE FREE TRANSLATIONS", "Hello")
+        )
+
+    def test_parse_tweet_status_strips_deepl_deprecation_banner_and_normalizes_und(self) -> None:
+        banner = (
+            "You're using an older version of DeepL.\n\n"
+            "Sie verwenden eine ältere Version von DeepL."
+        )
+        status = parse_tweet_status(
+            "2123464195270152664",
+            {
+                "text": "A new Docker, but a familiar story.",
+                "lang": "und",
+                "translation": {
+                    "text": banner,
+                    "source_lang": "en",
+                    "target_lang": "ja",
+                    "provider": "deepl",
+                },
+            },
+        )
+        self.assertIsNone(status.source_lang)
+        self.assertEqual(status.translation_source_lang, "en")
+        self.assertIsNone(status.translation_text)
+        self.assertIsNone(status.translation_target_lang)
+
+    def test_build_translation_message_refuses_deepl_deprecation_banner(self) -> None:
+        banner = (
+            "You're using an older version of DeepL.\n\n"
+            "DeepLの古いバージョンをご利用中です。"
+        )
+        status = TweetStatus(
+            tweet_id="1",
+            text="Hello world",
+            source_lang="en",
+            author_handle="docker",
+            translation_text=banner,
+        )
+        msg = build_translation_message(status, "https://x.com/docker/status/1")
+        self.assertNotIn("DeepL", msg)
+        self.assertTrue(msg.endswith("https://fxtwitter.com/docker/status/1"))
+
+
+class _FakeHTTPResponse:
+    def __init__(self, status: int, payload, *, json_error: Exception | None = None) -> None:
+        self.status = status
+        self._payload = payload
+        self._json_error = json_error
+
+    async def json(self, content_type=None):
+        if self._json_error is not None:
+            raise self._json_error
+        return self._payload
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
 
 class FetchTweetStatusTest(unittest.IsolatedAsyncioTestCase):
     async def test_fetch_tweet_status_wraps_client_error(self) -> None:
@@ -246,24 +334,157 @@ class FetchTweetStatusTest(unittest.IsolatedAsyncioTestCase):
             await fetch_tweet_status(session, "12345")
 
     async def test_fetch_tweet_status_reports_http_status_on_non_json_error(self) -> None:
-        class _FakeResponse:
-            status = 502
-
-            async def json(self, content_type=None):
-                raise ValueError("not json")
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, exc_type, exc, tb):
-                return False
-
         session = MagicMock()
-        session.get.return_value = _FakeResponse()
+        session.get.return_value = _FakeHTTPResponse(502, None, json_error=ValueError("not json"))
 
         with self.assertRaises(TweetFetchError) as ctx:
             await fetch_tweet_status(session, "12345")
         self.assertIn("HTTP 502", str(ctx.exception))
+
+    async def test_fetch_tweet_status_falls_back_when_fxtwitter_returns_deepl_banner(self) -> None:
+        banner = (
+            "You're using an older version of DeepL.\n\n"
+            "DeepLの古いバージョンをご利用中です。"
+        )
+        fx_payload = {
+            "status": {
+                "text": "A new Docker, but a familiar story.",
+                "lang": "en",
+                "author": {"screen_name": "Docker", "name": "Docker"},
+                "translation": {
+                    "text": banner,
+                    "source_lang": "en",
+                    "target_lang": "ja",
+                    "provider": "deepl",
+                },
+            }
+        }
+        session = MagicMock()
+        session.get.return_value = _FakeHTTPResponse(200, fx_payload)
+
+        with patch(
+            "src.twitter_tools.translate_text_fallback",
+            new=AsyncMock(return_value=("新しい Docker ですが、よく知られた話です。", "en")),
+        ) as fallback_mock:
+            status = await fetch_tweet_status(session, "2123464195270152664", target_lang="ja")
+
+        fallback_mock.assert_awaited_once()
+        self.assertEqual(status.translation_text, "新しい Docker ですが、よく知られた話です。")
+        self.assertEqual(status.translation_target_lang, "ja")
+        self.assertEqual(status.source_lang, "en")
+
+    async def test_fetch_tweet_status_skips_fallback_when_fxtwitter_translation_is_valid(self) -> None:
+        fx_payload = {
+            "status": {
+                "text": "Hello world",
+                "lang": "en",
+                "translation": {
+                    "text": "こんにちは世界",
+                    "source_lang": "en",
+                    "target_lang": "ja",
+                    "provider": "bing",
+                },
+            }
+        }
+        session = MagicMock()
+        session.get.return_value = _FakeHTTPResponse(200, fx_payload)
+
+        with patch("src.twitter_tools.translate_text_fallback", new=AsyncMock()) as fallback_mock:
+            status = await fetch_tweet_status(session, "12345", target_lang="ja")
+
+        fallback_mock.assert_not_awaited()
+        self.assertEqual(status.translation_text, "こんにちは世界")
+
+    async def test_fetch_tweet_status_clears_translation_if_fallback_detects_target_lang(self) -> None:
+        fx_payload = {
+            "status": {
+                "text": "東京天気予報",
+                "lang": "und",
+                "translation": None,
+            }
+        }
+        session = MagicMock()
+        session.get.return_value = _FakeHTTPResponse(200, fx_payload)
+
+        with patch(
+            "src.twitter_tools.translate_text_fallback",
+            new=AsyncMock(return_value=(None, "ja")),
+        ):
+            status = await fetch_tweet_status(session, "12345", target_lang="ja")
+
+        self.assertEqual(status.source_lang, "ja")
+        self.assertIsNone(status.translation_text)
+        self.assertFalse(status_needs_translation(status, "ja"))
+
+    async def test_translate_text_fallback_cascades_on_provider_failure(self) -> None:
+        session = MagicMock()
+        # clients5 returns 429, gtx returns 200
+        session.post.side_effect = [
+            _FakeHTTPResponse(429, None),
+            _FakeHTTPResponse(200, [[["こんにちは世界", "Hello world"]], None, "en"]),
+        ]
+
+        translated, detected = await translate_text_fallback(session, "Hello world", target_lang="ja")
+        self.assertEqual(translated, "こんにちは世界")
+        self.assertEqual(detected, "en")
+
+    async def test_translate_text_google_clients5_parses_auto_detect_payload(self) -> None:
+        session = MagicMock()
+        session.post.return_value = _FakeHTTPResponse(200, [["こんにちは世界", "en"]])
+
+        translated, detected = await translate_text_google_clients5(session, "Hello world", target_lang="ja")
+        self.assertEqual(translated, "こんにちは世界")
+        self.assertEqual(detected, "en")
+
+    async def test_translate_text_deepl_uses_free_endpoint_for_fx_key(self) -> None:
+        session = MagicMock()
+        session.post.return_value = _FakeHTTPResponse(
+            200,
+            {"translations": [{"detected_source_language": "EN", "text": "こんにちは"}]},
+        )
+
+        translated, detected = await translate_text_deepl(
+            session, "Hello", api_key="test-key:fx", target_lang="ja"
+        )
+        self.assertEqual(translated, "こんにちは")
+        self.assertEqual(detected, "en")
+        called_url = session.post.call_args.args[0]
+        self.assertIn("api-free.deepl.com", called_url)
+
+    async def test_translate_text_mymemory_rejects_quota_warning(self) -> None:
+        session = MagicMock()
+        session.get.return_value = _FakeHTTPResponse(
+            200,
+            {
+                "responseStatus": 200,
+                "responseData": {
+                    "translatedText": "MYMEMORY WARNING: YOU USED ALL AVAILABLE FREE TRANSLATIONS"
+                },
+            },
+        )
+
+        translated, detected = await translate_text_mymemory(
+            session, "Hello", source_lang="en", target_lang="ja"
+        )
+        self.assertIsNone(translated)
+        self.assertEqual(detected, "en")
+
+    async def test_fetch_tweet_status_skips_fallback_for_url_and_emoji_only_tweets(self) -> None:
+        fx_payload = {
+            "status": {
+                "text": "@someone 🚀🔥 https://example.com/test",
+                "lang": "und",
+                "translation": None,
+            }
+        }
+        session = MagicMock()
+        session.get.return_value = _FakeHTTPResponse(200, fx_payload)
+
+        with patch("src.twitter_tools.translate_text_fallback", new=AsyncMock()) as fallback_mock:
+            status = await fetch_tweet_status(session, "12345", target_lang="ja")
+
+        fallback_mock.assert_not_awaited()
+        self.assertIsNone(status.translation_text)
 
 
 if __name__ == "__main__":

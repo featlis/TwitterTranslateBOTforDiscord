@@ -270,6 +270,31 @@ class BotBehaviorTest(unittest.IsolatedAsyncioTestCase):
             self.assertIn("translate:555:ja", custom_ids)
             self.assertIsNotNone(kwargs["allowed_mentions"])
 
+    async def test_fetch_tweet_caches_translated_results_and_skips_caching_failed_translations(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bot = TwitterTranslateBot(
+                _make_settings(Path(tmpdir) / "bot_config.json", deepl_api_key="key:fx")
+            )
+            bot.http_session = SimpleNamespace(closed=False)
+            link = TweetLink(tweet_id="777", url="https://x.com/u/status/777", handle="u")
+
+            failed_status = TweetStatus(tweet_id="777", text="Hello", source_lang="en", translation_text=None)
+            ok_status = TweetStatus(tweet_id="777", text="Hello", source_lang="en", translation_text="こんにちは")
+
+            with patch(
+                "src.bot.fetch_tweet_status",
+                new=AsyncMock(side_effect=[failed_status, ok_status]),
+            ) as fetch_mock:
+                first = await bot.fetch_tweet(link, "ja")
+                self.assertIsNone(first.translation_text)
+                second = await bot.fetch_tweet(link, "ja")
+                self.assertEqual(second.translation_text, "こんにちは")
+                third = await bot.fetch_tweet(link, "ja")
+                self.assertEqual(third.translation_text, "こんにちは")
+
+            self.assertEqual(fetch_mock.await_count, 2)
+            self.assertEqual(fetch_mock.call_args.kwargs["deepl_api_key"], "key:fx")
+
 
 if __name__ == "__main__":
     unittest.main()

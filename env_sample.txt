@@ -8,9 +8,15 @@ DISCORD_GUILD_ID=
 # default target language: use of ja, en, zh, ko.
 TARGET_LANG=ja
 
+# default UI language: use of ja, en, zh, ko.
+UI_LANG=ja
+
 BOT_CONFIG_PATH=bot_config.json
 
 FXTWITTER_API_BASE=https://api.fxtwitter.com/2/status
+
+# optional: official DeepL API key (Free keys ending with :fx are supported)
+# DEEPL_API_KEY=
 
 REQUEST_TIMEOUT_SECONDS=10
 

@@ -8,6 +8,7 @@ import re
 import sys
 import tempfile
 import time
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -81,6 +82,7 @@ class Settings:
     request_timeout_seconds: float
     log_level: str
     config_path: Path
+    deepl_api_key: str | None = None
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -108,6 +110,7 @@ class Settings:
 
         target_lang_env = os.getenv("TARGET_LANG", "").strip() or "ja"
         ui_lang_env = os.getenv("UI_LANG", "").strip() or "ja"
+        deepl_api_key = os.getenv("DEEPL_API_KEY", "").strip() or None
 
         return cls(
             discord_token=token,
@@ -119,6 +122,7 @@ class Settings:
             request_timeout_seconds=request_timeout_seconds,
             log_level=os.getenv("LOG_LEVEL", "INFO").strip().upper() or "INFO",
             config_path=config_path,
+            deepl_api_key=deepl_api_key,
         )
 
 
@@ -169,6 +173,9 @@ class TwitterTranslateBot(commands.Bot):
         self.default_target_lang = settings.target_lang
         self.ui_lang = settings.ui_lang
         self.http_session: aiohttp.ClientSession | None = None
+        self._status_cache: OrderedDict[tuple[str, str], tuple[float, TweetStatus]] = OrderedDict()
+        self._status_cache_ttl_seconds = 600.0
+        self._status_cache_max_entries = 256
 
     async def setup_hook(self) -> None:
         self.http_session = aiohttp.ClientSession()
@@ -283,13 +290,32 @@ class TwitterTranslateBot(commands.Bot):
             raise RuntimeError("HTTP session is not ready yet.")
 
         target = canonical_language_code(target_lang or self.default_target_lang)
-        return await fetch_tweet_status(
+        cache_key = (link.tweet_id, target)
+        now = time.monotonic()
+        cached = self._status_cache.get(cache_key)
+        if cached is not None:
+            expires_at, cached_status = cached
+            if now < expires_at:
+                self._status_cache.move_to_end(cache_key)
+                return cached_status
+            self._status_cache.pop(cache_key, None)
+
+        status = await fetch_tweet_status(
             self.http_session,
             link.tweet_id,
             target_lang=target,
             api_base=self.settings.fxtwitter_api_base,
             timeout_seconds=self.settings.request_timeout_seconds,
+            deepl_api_key=self.settings.deepl_api_key,
         )
+
+        if status.translation_text or not status_needs_translation(status, target):
+            self._status_cache[cache_key] = (now + self._status_cache_ttl_seconds, status)
+            self._status_cache.move_to_end(cache_key)
+            while len(self._status_cache) > self._status_cache_max_entries:
+                self._status_cache.popitem(last=False)
+
+        return status
 
     def set_default_target_lang(self, target_lang: str) -> str:
         target = canonical_language_code(target_lang)

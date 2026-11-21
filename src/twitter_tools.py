@@ -1,12 +1,57 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import html
+import logging
 import re
 from typing import Any
 
 
 DEFAULT_FXTWITTER_API_BASE = "https://api.fxtwitter.com/2/status"
+DEFAULT_GOOGLE_CLIENTS5_URL = "https://clients5.google.com/translate_a/t"
+DEFAULT_GOOGLE_TRANSLATE_URL = "https://translate.googleapis.com/translate_a/single"
+DEFAULT_MYMEMORY_TRANSLATE_URL = "https://api.mymemory.translated.net/get"
+DEEPL_FREE_API_URL = "https://api-free.deepl.com/v2/translate"
+DEEPL_PRO_API_URL = "https://api.deepl.com/v2/translate"
+
+GOOGLE_TRANSLATE_LANG_CODES: dict[str, str] = {
+    "ja": "ja",
+    "en": "en",
+    "zh": "zh-CN",
+    "ko": "ko",
+}
+
+DEEPL_TARGET_LANG_CODES: dict[str, str] = {
+    "ja": "JA",
+    "en": "EN-US",
+    "zh": "ZH-HANS",
+    "ko": "KO",
+}
+
+INVALID_TRANSLATION_MARKERS: tuple[str, ...] = (
+    "you're using an older version of deepl",
+    "deeplの古いバージョンをご利用中です",
+    "sie verwenden eine ältere version von deepl",
+    "vous utilisez une ancienne version de deepl",
+    "вы используете старую версию deepl",
+    "您正在使用旧版本的 deepl",
+    "estás usando una versión antigua de deepl",
+    "stai utilizzando una versione precedente di deepl",
+    "deepl'in eski bir sürümünü kullanıyorsun",
+    "korzystasz ze starszej wersji deepl",
+    "está a utilizar uma versão mais antiga do deepl",
+    "u gebruikt een oudere versie van deepl",
+    "anda menggunakan deepl versi lama",
+    "používáte starší verzi deepl",
+    "ти використовуєш стару версію deepl",
+)
+
+PROVIDER_ERROR_MARKERS: tuple[str, ...] = (
+    "mymemory warning:",
+    "query length limit exceeded",
+)
+
+NON_LINGUISTIC_LANG_CODES: frozenset[str] = frozenset({"qme", "qht", "qam", "zxx"})
 
 TWEET_URL_RE = re.compile(
     r"https?://(?:www\.|mobile\.)?"
@@ -17,6 +62,7 @@ TWEET_URL_RE = re.compile(
 )
 
 JAPANESE_SCRIPT_RE = re.compile(r"[\u3040-\u30ff]")
+NON_TEXT_TOKEN_RE = re.compile(r"https?://\S+|@[A-Za-z0-9_]+")
 
 LANGUAGE_OPTIONS: dict[str, dict[str, str]] = {
     "ja": {"api_code": "ja", "label": "日本語"},
@@ -225,7 +271,39 @@ def extract_tweet_links(text: str) -> list[TweetLink]:
 def normalize_lang_code(lang: str | None) -> str | None:
     if not isinstance(lang, str):
         return None
-    return lang.strip().lower().replace("_", "-") or None
+    normalized = lang.strip().lower().replace("_", "-")
+    return normalized or None
+
+
+def _meaningful_lang_code(lang: str | None) -> str | None:
+    normalized = normalize_lang_code(lang)
+    if not normalized or normalized == "und":
+        return None
+    return normalized
+
+
+def is_invalid_translation_text(translation_text: str | None, original_text: str = "") -> bool:
+    """Detect upstream provider error/deprecation notices masquerading as translations."""
+    if not translation_text or not translation_text.strip():
+        return True
+
+    unescaped = html.unescape(translation_text).strip()
+    lowered = unescaped.lower()
+    orig_lower = html.unescape(original_text or "").lower()
+
+    if (lowered.startswith("<!doctype html") or lowered.startswith("<html")) and "<html" not in orig_lower:
+        return True
+
+    if any(marker in lowered and marker not in orig_lower for marker in PROVIDER_ERROR_MARKERS):
+        return True
+
+    marker_hits = sum(1 for marker in INVALID_TRANSLATION_MARKERS if marker in lowered)
+    if marker_hits >= 2:
+        return True
+    if marker_hits == 1 and "deepl" not in orig_lower:
+        return True
+
+    return False
 
 
 def supported_language_codes() -> tuple[str, ...]:
@@ -266,7 +344,9 @@ def text_looks_japanese(text: str) -> bool:
 
 def status_needs_translation(status: TweetStatus, target_lang: str = "ja") -> bool:
     canonical_target = canonical_language_code(target_lang)
-    source_lang = status.source_lang or status.translation_source_lang
+    source_lang = _meaningful_lang_code(status.source_lang) or _meaningful_lang_code(
+        status.translation_source_lang
+    )
     if is_target_language(source_lang, canonical_target):
         return False
     if not source_lang and canonical_target == "ja" and text_looks_japanese(status.text):
@@ -288,6 +368,297 @@ def build_video_link_message(original_url: str, fallback_handle: str | None = No
     return to_fxtwitter_url(original_url, fallback_handle=fallback_handle)
 
 
+def _prepare_fallback_query_text(text: str, max_chars: int = 4500) -> str:
+    cleaned = text.strip()
+    if len(cleaned) <= max_chars:
+        return cleaned
+    return cleaned[:max_chars].rsplit(" ", 1)[0].strip() or cleaned[:max_chars]
+
+
+def _has_translatable_text(text: str) -> bool:
+    stripped = NON_TEXT_TOKEN_RE.sub("", text)
+    return any(ch.isalpha() for ch in stripped)
+
+
+async def translate_text_deepl(
+    session: Any,
+    text: str,
+    *,
+    api_key: str,
+    target_lang: str = "ja",
+    timeout_seconds: float = 10,
+) -> tuple[str | None, str | None]:
+    """Translate text via the official DeepL REST API v2."""
+    query_text = _prepare_fallback_query_text(text)
+    if not query_text or not api_key.strip():
+        return None, None
+
+    try:
+        import aiohttp
+    except ImportError as exc:  # pragma: no cover - setup guard
+        raise RuntimeError("aiohttp is required. Install dependencies from requirements.txt.") from exc
+
+    canonical_target = canonical_language_code(target_lang)
+    deepl_target = DEEPL_TARGET_LANG_CODES[canonical_target]
+    api_url = DEEPL_FREE_API_URL if api_key.strip().endswith(":fx") else DEEPL_PRO_API_URL
+    timeout = aiohttp.ClientTimeout(total=timeout_seconds)
+
+    try:
+        async with session.post(
+            api_url,
+            headers={
+                "Authorization": f"DeepL-Auth-Key {api_key.strip()}",
+                "Content-Type": "application/json",
+            },
+            json={"text": [query_text], "target_lang": deepl_target},
+            timeout=timeout,
+        ) as response:
+            if response.status >= 400:
+                logging.warning("Official DeepL API returned HTTP %s.", response.status)
+                return None, None
+            payload = await response.json(content_type=None)
+    except Exception as exc:
+        logging.warning("Official DeepL API request failed: %s", exc)
+        return None, None
+
+    if not isinstance(payload, dict):
+        return None, None
+    translations = payload.get("translations")
+    if not isinstance(translations, list) or not translations or not isinstance(translations[0], dict):
+        return None, None
+
+    translated_text = html.unescape(str(translations[0].get("text") or "")).strip()
+    detected_source = _meaningful_lang_code(translations[0].get("detected_source_language"))
+
+    if not translated_text or is_invalid_translation_text(translated_text, query_text):
+        return None, detected_source
+    if translated_text == query_text:
+        return None, detected_source
+    return translated_text, detected_source
+
+
+async def translate_text_google_clients5(
+    session: Any,
+    text: str,
+    *,
+    target_lang: str = "ja",
+    timeout_seconds: float = 10,
+    api_url: str = DEFAULT_GOOGLE_CLIENTS5_URL,
+) -> tuple[str | None, str | None]:
+    """Translate text via Google Translate's clients5 endpoint."""
+    query_text = _prepare_fallback_query_text(text)
+    if not query_text:
+        return None, None
+
+    try:
+        import aiohttp
+    except ImportError as exc:  # pragma: no cover - setup guard
+        raise RuntimeError("aiohttp is required. Install dependencies from requirements.txt.") from exc
+
+    canonical_target = canonical_language_code(target_lang)
+    google_target = GOOGLE_TRANSLATE_LANG_CODES[canonical_target]
+    timeout = aiohttp.ClientTimeout(total=timeout_seconds)
+
+    try:
+        async with session.post(
+            api_url,
+            params={"client": "dict-chrome-ex", "sl": "auto", "tl": google_target},
+            data={"q": query_text},
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=timeout,
+        ) as response:
+            if response.status >= 400:
+                logging.warning("Fallback Google clients5 returned HTTP %s.", response.status)
+                return None, None
+            payload = await response.json(content_type=None)
+    except Exception as exc:
+        logging.warning("Fallback Google clients5 failed: %s", exc)
+        return None, None
+
+    if not isinstance(payload, list) or not payload:
+        return None, None
+
+    first = payload[0]
+    if isinstance(first, list) and first and first[0] is not None:
+        raw_translated = str(first[0])
+        detected_source = _meaningful_lang_code(first[1]) if len(first) > 1 else None
+    elif isinstance(first, str):
+        raw_translated = first
+        detected_source = None
+    else:
+        return None, None
+
+    translated_text = html.unescape(raw_translated).strip()
+    if not translated_text or is_invalid_translation_text(translated_text, query_text):
+        return None, detected_source
+    if translated_text == query_text:
+        return None, detected_source
+    return translated_text, detected_source
+
+
+async def translate_text_google(
+    session: Any,
+    text: str,
+    *,
+    target_lang: str = "ja",
+    timeout_seconds: float = 10,
+    api_url: str = DEFAULT_GOOGLE_TRANSLATE_URL,
+) -> tuple[str | None, str | None]:
+    """Translate text via Google Translate's gtx endpoint as a fallback.
+
+    Returns ``(translated_text, detected_source_lang)``. Returns ``(None, None)`` on failure.
+    """
+    query_text = _prepare_fallback_query_text(text)
+    if not query_text:
+        return None, None
+
+    try:
+        import aiohttp
+    except ImportError as exc:  # pragma: no cover - setup guard
+        raise RuntimeError("aiohttp is required. Install dependencies from requirements.txt.") from exc
+
+    canonical_target = canonical_language_code(target_lang)
+    google_target = GOOGLE_TRANSLATE_LANG_CODES[canonical_target]
+    timeout = aiohttp.ClientTimeout(total=timeout_seconds)
+
+    try:
+        async with session.post(
+            api_url,
+            params={"client": "gtx", "sl": "auto", "tl": google_target, "dt": "t"},
+            data={"q": query_text},
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=timeout,
+        ) as response:
+            if response.status >= 400:
+                logging.warning("Fallback Google Translate returned HTTP %s.", response.status)
+                return None, None
+            payload = await response.json(content_type=None)
+    except Exception as exc:
+        logging.warning("Fallback Google Translate failed: %s", exc)
+        return None, None
+
+    if not isinstance(payload, list) or not payload or not isinstance(payload[0], list):
+        return None, None
+
+    segments = [
+        str(segment[0])
+        for segment in payload[0]
+        if isinstance(segment, list) and segment and segment[0] is not None
+    ]
+    translated_text = html.unescape("".join(segments)).strip()
+    detected_source = _meaningful_lang_code(payload[2]) if len(payload) > 2 else None
+
+    if not translated_text or is_invalid_translation_text(translated_text, query_text):
+        return None, detected_source
+
+    if translated_text == query_text:
+        return None, detected_source
+
+    return translated_text, detected_source
+
+
+async def translate_text_mymemory(
+    session: Any,
+    text: str,
+    *,
+    source_lang: str | None,
+    target_lang: str = "ja",
+    timeout_seconds: float = 10,
+    api_url: str = DEFAULT_MYMEMORY_TRANSLATE_URL,
+) -> tuple[str | None, str | None]:
+    """Translate short text via MyMemory's free public REST API as a last-resort fallback."""
+    cleaned = text.strip()
+    normalized_source = _meaningful_lang_code(source_lang)
+    if not cleaned or not normalized_source or normalized_source in NON_LINGUISTIC_LANG_CODES:
+        return None, None
+    if len(cleaned.encode("utf-8")) > 500:
+        return None, None
+
+    try:
+        import aiohttp
+    except ImportError as exc:  # pragma: no cover - setup guard
+        raise RuntimeError("aiohttp is required. Install dependencies from requirements.txt.") from exc
+
+    canonical_target = canonical_language_code(target_lang)
+    target_code = GOOGLE_TRANSLATE_LANG_CODES[canonical_target]
+    timeout = aiohttp.ClientTimeout(total=timeout_seconds)
+
+    try:
+        async with session.get(
+            api_url,
+            params={"q": cleaned, "langpair": f"{normalized_source}|{target_code}"},
+            headers={"User-Agent": "TwitterTranslateBOTforDiscord/1.0"},
+            timeout=timeout,
+        ) as response:
+            if response.status >= 400:
+                logging.warning("Fallback MyMemory returned HTTP %s.", response.status)
+                return None, None
+            payload = await response.json(content_type=None)
+    except Exception as exc:
+        logging.warning("Fallback MyMemory failed: %s", exc)
+        return None, None
+
+    if not isinstance(payload, dict) or payload.get("responseStatus") != 200:
+        return None, None
+
+    response_data = payload.get("responseData")
+    if not isinstance(response_data, dict):
+        return None, None
+
+    translated_text = html.unescape(str(response_data.get("translatedText") or "")).strip()
+    if not translated_text or is_invalid_translation_text(translated_text, cleaned):
+        return None, normalized_source
+    if translated_text == cleaned:
+        return None, normalized_source
+    return translated_text, normalized_source
+
+
+async def translate_text_fallback(
+    session: Any,
+    text: str,
+    *,
+    target_lang: str = "ja",
+    source_lang: str | None = None,
+    timeout_seconds: float = 10,
+    deepl_api_key: str | None = None,
+) -> tuple[str | None, str | None]:
+    """Try fallback translation providers in priority order."""
+    canonical_target = canonical_language_code(target_lang)
+    detected_source: str | None = None
+
+    if deepl_api_key:
+        translated, detected = await translate_text_deepl(
+            session,
+            text,
+            api_key=deepl_api_key,
+            target_lang=canonical_target,
+            timeout_seconds=timeout_seconds,
+        )
+        detected_source = detected_source or detected
+        if translated or (detected and is_target_language(detected, canonical_target)):
+            return translated, detected_source
+
+    for provider in (translate_text_google_clients5, translate_text_google):
+        translated, detected = await provider(
+            session,
+            text,
+            target_lang=canonical_target,
+            timeout_seconds=timeout_seconds,
+        )
+        detected_source = detected_source or detected
+        if translated or (detected and is_target_language(detected, canonical_target)):
+            return translated, detected_source
+
+    translated, detected = await translate_text_mymemory(
+        session,
+        text,
+        source_lang=source_lang or detected_source,
+        target_lang=canonical_target,
+        timeout_seconds=timeout_seconds,
+    )
+    return translated, detected_source or detected
+
+
 async def fetch_tweet_status(
     session: Any,
     tweet_id: str,
@@ -295,20 +666,24 @@ async def fetch_tweet_status(
     target_lang: str = "ja",
     api_base: str = DEFAULT_FXTWITTER_API_BASE,
     timeout_seconds: float = 10,
+    enable_fallback_translation: bool = True,
+    deepl_api_key: str | None = None,
 ) -> TweetStatus:
-    """Fetch a tweet and request a translation from FxTwitter/FxEmbed."""
+    """Fetch a tweet and request a translation from FxTwitter/FxEmbed, falling back to external translators."""
     try:
         import aiohttp
     except ImportError as exc:  # pragma: no cover - setup guard
         raise RuntimeError("aiohttp is required. Install dependencies from requirements.txt.") from exc
 
+    canonical_target = canonical_language_code(target_lang)
     request_url = f"{api_base.rstrip('/')}/{tweet_id}"
     timeout = aiohttp.ClientTimeout(total=timeout_seconds)
 
     try:
         async with session.get(
             request_url,
-            params={"lang": to_api_language_code(target_lang)},
+            params={"lang": to_api_language_code(canonical_target)},
+            headers={"User-Agent": "TwitterTranslateBOTforDiscord/1.0"},
             timeout=timeout,
         ) as response:
             try:
@@ -336,7 +711,43 @@ async def fetch_tweet_status(
         message = payload.get("message")
         raise TweetFetchError(message or f"FxTwitter response did not include tweet data for {tweet_id}.")
 
-    return parse_tweet_status(tweet_id, status_payload)
+    status = parse_tweet_status(tweet_id, status_payload)
+
+    if (
+        enable_fallback_translation
+        and not status.translation_text
+        and status.text
+        and _has_translatable_text(status.text)
+        and status.source_lang not in NON_LINGUISTIC_LANG_CODES
+        and status_needs_translation(status, canonical_target)
+    ):
+        translated_text, detected_source = await translate_text_fallback(
+            session,
+            status.text,
+            target_lang=canonical_target,
+            source_lang=status.source_lang or status.translation_source_lang,
+            timeout_seconds=timeout_seconds,
+            deepl_api_key=deepl_api_key,
+        )
+        effective_source = status.source_lang or detected_source
+        if detected_source and is_target_language(detected_source, canonical_target):
+            return replace(
+                status,
+                source_lang=effective_source,
+                translation_text=None,
+                translation_source_lang=status.translation_source_lang or detected_source,
+                translation_target_lang=None,
+            )
+        if translated_text:
+            return replace(
+                status,
+                source_lang=effective_source,
+                translation_text=translated_text,
+                translation_source_lang=status.translation_source_lang or detected_source,
+                translation_target_lang=canonical_target,
+            )
+
+    return status
 
 
 def parse_tweet_status(tweet_id: str, status_payload: dict[str, Any]) -> TweetStatus:
@@ -359,32 +770,44 @@ def parse_tweet_status(tweet_id: str, status_payload: dict[str, Any]) -> TweetSt
         or status_payload.get("description")
         or ""
     )
+    cleaned_text = html.unescape(str(text)).strip()
+
+    raw_translation_text = _string_or_none(
+        translation_payload.get("text")
+        or translation_payload.get("translated_text")
+        or translation_payload.get("translatedText")
+    )
+    translation_valid = bool(
+        raw_translation_text and not is_invalid_translation_text(raw_translation_text, cleaned_text)
+    )
+    translation_text = raw_translation_text if translation_valid else None
+    translation_target_lang = (
+        _meaningful_lang_code(
+            translation_payload.get("target_lang")
+            or translation_payload.get("targetLang")
+            or translation_payload.get("target_language")
+        )
+        if translation_valid
+        else None
+    )
 
     return TweetStatus(
         tweet_id=tweet_id,
-        text=html.unescape(str(text)).strip(),
-        source_lang=normalize_lang_code(status_payload.get("lang")),
+        text=cleaned_text,
+        source_lang=_meaningful_lang_code(status_payload.get("lang")),
         author_name=_string_or_none(author_payload.get("name")),
         author_handle=_string_or_none(
             author_payload.get("screen_name")
             or author_payload.get("screenName")
             or author_payload.get("username")
         ),
-        translation_text=_string_or_none(
-            translation_payload.get("text")
-            or translation_payload.get("translated_text")
-            or translation_payload.get("translatedText")
-        ),
-        translation_source_lang=normalize_lang_code(
+        translation_text=translation_text,
+        translation_source_lang=_meaningful_lang_code(
             translation_payload.get("source_lang")
             or translation_payload.get("sourceLang")
             or translation_payload.get("source_language")
         ),
-        translation_target_lang=normalize_lang_code(
-            translation_payload.get("target_lang")
-            or translation_payload.get("targetLang")
-            or translation_payload.get("target_language")
-        ),
+        translation_target_lang=translation_target_lang,
         has_video=payload_has_video_media(status_payload),
     )
 
@@ -453,7 +876,7 @@ def build_translation_message(
     suffix = f"\n{display_url}"
     max_quote_len = max_length - len(prefix) - len(suffix)
 
-    if not translated_text or max_quote_len <= 0:
+    if not translated_text or is_invalid_translation_text(translated_text, status.text) or max_quote_len <= 0:
         return f"{header}\n{display_url}"
 
     quoted_lines = [f"> {line}" if line else ">" for line in translated_text.splitlines()]
