@@ -165,7 +165,12 @@ UI_MESSAGES = {
 
 def get_ui_message(key: str, ui_lang: str = "ja", **kwargs) -> str:
     """Get a localized UI message."""
-    lang = ui_lang if ui_lang in UI_MESSAGES else "ja"
+    try:
+        lang = canonical_language_code(ui_lang)
+    except ValueError:
+        lang = "ja"
+    if lang not in UI_MESSAGES:
+        lang = "ja"
     template = UI_MESSAGES[lang].get(key, UI_MESSAGES["ja"].get(key, key))
     return template.format(**kwargs)
 
@@ -218,7 +223,7 @@ def extract_tweet_links(text: str) -> list[TweetLink]:
 
 
 def normalize_lang_code(lang: str | None) -> str | None:
-    if not lang:
+    if not isinstance(lang, str):
         return None
     return lang.strip().lower().replace("_", "-") or None
 
@@ -260,10 +265,11 @@ def text_looks_japanese(text: str) -> bool:
 
 
 def status_needs_translation(status: TweetStatus, target_lang: str = "ja") -> bool:
+    canonical_target = canonical_language_code(target_lang)
     source_lang = status.source_lang or status.translation_source_lang
-    if is_target_language(source_lang, target_lang):
+    if is_target_language(source_lang, canonical_target):
         return False
-    if not source_lang and target_lang == "ja" and text_looks_japanese(status.text):
+    if not source_lang and canonical_target == "ja" and text_looks_japanese(status.text):
         return False
     return True
 
@@ -299,19 +305,28 @@ async def fetch_tweet_status(
     request_url = f"{api_base.rstrip('/')}/{tweet_id}"
     timeout = aiohttp.ClientTimeout(total=timeout_seconds)
 
-    async with session.get(
-        request_url,
-        params={"lang": to_api_language_code(target_lang)},
-        timeout=timeout,
-    ) as response:
-        try:
-            payload = await response.json(content_type=None)
-        except Exception as exc:
-            raise TweetFetchError(f"FxTwitter returned a non-JSON response for {tweet_id}.") from exc
+    try:
+        async with session.get(
+            request_url,
+            params={"lang": to_api_language_code(target_lang)},
+            timeout=timeout,
+        ) as response:
+            try:
+                payload = await response.json(content_type=None)
+            except Exception as exc:
+                if response.status >= 400:
+                    raise TweetFetchError(
+                        f"FxTwitter returned HTTP {response.status} for {tweet_id}."
+                    ) from exc
+                raise TweetFetchError(f"FxTwitter returned a non-JSON response for {tweet_id}.") from exc
 
-        if response.status >= 400:
-            message = payload.get("message") if isinstance(payload, dict) else None
-            raise TweetFetchError(message or f"FxTwitter returned HTTP {response.status} for {tweet_id}.")
+            if response.status >= 400:
+                message = payload.get("message") if isinstance(payload, dict) else None
+                raise TweetFetchError(message or f"FxTwitter returned HTTP {response.status} for {tweet_id}.")
+    except TweetFetchError:
+        raise
+    except (aiohttp.ClientError, TimeoutError) as exc:
+        raise TweetFetchError(f"Failed to connect to FxTwitter for {tweet_id}: {exc}") from exc
 
     if not isinstance(payload, dict):
         raise TweetFetchError(f"FxTwitter returned an unexpected response for {tweet_id}.")
@@ -397,6 +412,13 @@ def _media_payload_has_video(media_payload: Any) -> bool:
     if isinstance(videos, list) and any(isinstance(item, dict) for item in videos):
         return True
 
+    all_media = media_payload.get("all")
+    if isinstance(all_media, list) and any(
+        isinstance(item, dict) and str(item.get("type", "")).lower() in {"video", "gif"}
+        for item in all_media
+    ):
+        return True
+
     photos = media_payload.get("photos")
     if isinstance(photos, list):
         return any(isinstance(item, dict) and str(item.get("type", "")).lower() == "gif" for item in photos)
@@ -425,21 +447,20 @@ def build_translation_message(
         target=target,
     )
 
-    translated_text = (status.translation_text or "").strip()
-    translated_text = html.unescape(translated_text)
+    translated_text = html.unescape(status.translation_text or "").strip()
 
     prefix = f"{header}\n"
     suffix = f"\n{display_url}"
     max_quote_len = max_length - len(prefix) - len(suffix)
 
-    if not translated_text:
+    if not translated_text or max_quote_len <= 0:
         return f"{header}\n{display_url}"
 
     quoted_lines = [f"> {line}" if line else ">" for line in translated_text.splitlines()]
     quoted_text = "\n".join(quoted_lines)
 
     if len(quoted_text) > max_quote_len:
-        quoted_text = _truncate(quoted_text, max(1, max_quote_len))
+        quoted_text = _truncate(quoted_text, max_quote_len)
 
     return f"{prefix}{quoted_text}{suffix}"
 
@@ -452,6 +473,10 @@ def _string_or_none(value: Any) -> str | None:
 
 
 def _truncate(text: str, limit: int) -> str:
+    if limit <= 0:
+        return ""
     if len(text) <= limit:
         return text
-    return text[: max(0, limit - 3)].rstrip() + "..."
+    if limit <= 3:
+        return "." * limit
+    return text[: limit - 3].rstrip() + "..."

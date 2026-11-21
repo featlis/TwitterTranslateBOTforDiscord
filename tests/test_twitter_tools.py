@@ -1,11 +1,19 @@
 import unittest
+from unittest.mock import MagicMock
+
+import aiohttp
 
 from src.twitter_tools import (
+    TweetFetchError,
     TweetStatus,
+    _truncate,
     build_translation_message,
     build_video_link_message,
     canonical_language_code,
     extract_tweet_links,
+    fetch_tweet_status,
+    get_ui_message,
+    normalize_lang_code,
     payload_has_video_media,
     parse_tweet_status,
     status_needs_translation,
@@ -179,6 +187,83 @@ class TwitterToolsTest(unittest.TestCase):
                 }
             )
         )
+
+    def test_payload_has_video_media_checks_all_media_list(self) -> None:
+        self.assertTrue(
+            payload_has_video_media(
+                {
+                    "text": "GIF post",
+                    "media": {"all": [{"type": "gif", "url": "https://video.twimg.com/example.mp4"}]},
+                }
+            )
+        )
+
+    def test_status_needs_translation_handles_ja_alias_when_source_unknown(self) -> None:
+        status = TweetStatus(tweet_id="1", text="こんにちは", source_lang=None)
+        self.assertFalse(status_needs_translation(status, target_lang="jp"))
+
+    def test_get_ui_message_normalizes_language_aliases(self) -> None:
+        self.assertEqual(
+            get_ui_message("help_title", ui_lang="en-US"),
+            get_ui_message("help_title", ui_lang="en"),
+        )
+        self.assertEqual(
+            get_ui_message("help_title", ui_lang="zh-CN"),
+            get_ui_message("help_title", ui_lang="zh"),
+        )
+
+    def test_normalize_lang_code_handles_non_string(self) -> None:
+        self.assertIsNone(normalize_lang_code(None))
+        self.assertIsNone(normalize_lang_code(123))  # type: ignore[arg-type]
+
+    def test_truncate_respects_small_limits(self) -> None:
+        self.assertEqual(_truncate("abcdef", 0), "")
+        self.assertEqual(_truncate("abcdef", 1), ".")
+        self.assertEqual(_truncate("abcdef", 2), "..")
+        self.assertEqual(_truncate("abcdef", 3), "...")
+        self.assertEqual(_truncate("abcdef", 5), "ab...")
+
+    def test_build_translation_message_handles_tiny_max_length_without_truncating_url(self) -> None:
+        status = TweetStatus(
+            tweet_id="12345",
+            text="Hello",
+            source_lang="en",
+            author_handle="example",
+            translation_text="こんにちは世界",
+        )
+        url = "https://x.com/example/status/12345"
+        msg = build_translation_message(status, url, max_length=50)
+        self.assertTrue(msg.endswith("https://fxtwitter.com/example/status/12345"))
+        self.assertNotIn("...", msg)
+
+
+class FetchTweetStatusTest(unittest.IsolatedAsyncioTestCase):
+    async def test_fetch_tweet_status_wraps_client_error(self) -> None:
+        session = MagicMock()
+        session.get.side_effect = aiohttp.ClientError("connection reset")
+
+        with self.assertRaises(TweetFetchError):
+            await fetch_tweet_status(session, "12345")
+
+    async def test_fetch_tweet_status_reports_http_status_on_non_json_error(self) -> None:
+        class _FakeResponse:
+            status = 502
+
+            async def json(self, content_type=None):
+                raise ValueError("not json")
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+        session = MagicMock()
+        session.get.return_value = _FakeResponse()
+
+        with self.assertRaises(TweetFetchError) as ctx:
+            await fetch_tweet_status(session, "12345")
+        self.assertIn("HTTP 502", str(ctx.exception))
 
 
 if __name__ == "__main__":
